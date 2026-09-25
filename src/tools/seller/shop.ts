@@ -31,8 +31,7 @@ export function registerSellerShopTools(server: McpServer): void {
         const data = (json.data ?? json) as Record<string, unknown>;
         const name = typeof data.name === 'string' ? data.name : undefined;
         if (name) {
-          const flag = (label: string, v: unknown): string =>
-            `   ${v ? '✅' : '—'} ${label}`;
+          const flag = (label: string, v: unknown): string => `   ${v ? '✅' : '—'} ${label}`;
           const lines = [
             '🏪 Seller Shop Info',
             '',

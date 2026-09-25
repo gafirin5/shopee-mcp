@@ -13,6 +13,7 @@ import { findArray, previewRow, formatSellerPayload } from '../src/tools/seller/
 import { findVideoInfo } from '../src/utils/media.js';
 import { summarizeJson } from '../src/utils/json.js';
 import { parseProductRef } from '../src/tools/research.js';
+import { parseShopRef } from '../src/tools/shop.js';
 import type { SearchItem, ItemBasic } from '../src/api/types.js';
 
 let failures = 0;
@@ -390,6 +391,24 @@ test('parseProductRef: a bare itemid needs a default shop id', () => {
 
 test('parseProductRef: rejects garbage', () => {
   assert.equal(parseProductRef('not-a-product'), null);
+});
+
+// ─── parseShopRef (get_shop_products input) ─────────────────────────────────
+
+test('parseShopRef: accepts a numeric shop id', () => {
+  assert.equal(parseShopRef(' 1643579153 '), '1643579153');
+});
+
+test('parseShopRef: parses a /shop/<id> URL', () => {
+  assert.equal(parseShopRef('https://shopee.co.id/shop/1643579153/search'), '1643579153');
+});
+
+test('parseShopRef: extracts the shopid from a product slug URL', () => {
+  assert.equal(parseShopRef('https://shopee.co.id/Kaos-i.1643579153.50068259700'), '1643579153');
+});
+
+test('parseShopRef: rejects garbage', () => {
+  assert.equal(parseShopRef('not-a-shop'), null);
 });
 
 await runTests();

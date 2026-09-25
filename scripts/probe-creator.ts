@@ -18,18 +18,27 @@ async function main(): Promise<void> {
       }
     };
     page.on('response', onResp);
-    await page.goto(`https://seller.shopee.co.id/creator-center`, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch((e) =>
-      console.log('nav warn:', e instanceof Error ? e.message.split('\n')[0] : e),
-    );
+    await page
+      .goto(`https://seller.shopee.co.id/creator-center`, {
+        waitUntil: 'domcontentloaded',
+        timeout: 60000,
+      })
+      .catch((e) => console.log('nav warn:', e instanceof Error ? e.message.split('\n')[0] : e));
     await page.waitForTimeout(10000);
 
-    const inputCount = await page.locator('input[type="file"][accept*="video"], input[type="file"][accept*="mp4"]').count();
+    const inputCount = await page
+      .locator('input[type="file"][accept*="video"], input[type="file"][accept*="mp4"]')
+      .count();
     const anyInput = await page.locator('input[type="file"]').count();
     const uploadTexts = await page
-      .locator('button:has-text("Unggah"), button:has-text("Upload"), a:has-text("Unggah"), a:has-text("Upload"), [class*="upload" i]')
+      .locator(
+        'button:has-text("Unggah"), button:has-text("Upload"), a:has-text("Unggah"), a:has-text("Upload"), [class*="upload" i]',
+      )
       .count();
     console.log(`final URL: ${page.url()}`);
-    console.log(`video file input: ${inputCount} | any file input: ${anyInput} | upload-affordance nodes: ${uploadTexts}`);
+    console.log(
+      `video file input: ${inputCount} | any file input: ${anyInput} | upload-affordance nodes: ${uploadTexts}`,
+    );
     console.log(`title: ${await page.title().catch(() => '?')}`);
     console.log('API endpoints seen:');
     for (const u of [...urls].slice(0, 15)) console.log(`  ${u}`);

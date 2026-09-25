@@ -47,10 +47,14 @@ async function main(): Promise<void> {
   }
 
   if (onboarded) {
-    console.log('\n🎉 VERIFIED! is_onboarded=1 — all Seller Centre & creator-center features are now open.');
+    console.log(
+      '\n🎉 VERIFIED! is_onboarded=1 — all Seller Centre & creator-center features are now open.',
+    );
     console.log('   Next: test upload_product_video and the seller tools from the MCP client.');
   } else {
-    console.log(`\n🔒 Not verified within ${timeoutS}s. The QR may have expired — re-run to get a fresh one.`);
+    console.log(
+      `\n🔒 Not verified within ${timeoutS}s. The QR may have expired — re-run to get a fresh one.`,
+    );
   }
 }
 
@@ -59,4 +63,8 @@ main()
     console.error('failed:', err);
     process.exitCode = 1;
   })
-  .finally(() => closeContext().catch(() => {}).then(() => process.exit(process.exitCode ?? 0)));
+  .finally(() =>
+    closeContext()
+      .catch(() => {})
+      .then(() => process.exit(process.exitCode ?? 0)),
+  );

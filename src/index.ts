@@ -8,6 +8,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { registerSearchTools } from './tools/search.js';
 import { registerProductTools } from './tools/product.js';
 import { registerStatusTools } from './tools/status.js';
+import { registerShopTools } from './tools/shop.js';
 import { registerSellerStatusTools } from './tools/seller/status.js';
 import { registerSellerProbeTools } from './tools/seller/probe.js';
 import { registerSellerShopTools } from './tools/seller/shop.js';
@@ -38,6 +39,7 @@ async function main() {
   registerSearchTools(server);
   registerProductTools(server);
   registerStatusTools(server);
+  registerShopTools(server);
 
   // Seller Centre realm: portal reads + product write actions on your own shop.
   // Sign in once with `npm run login:seller` (SSO usually covers it).

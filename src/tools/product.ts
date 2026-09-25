@@ -4,6 +4,7 @@ import { shopeeCapture, shopeeUrl } from '../api/client.js';
 import { BASE_URL } from '../browser/session.js';
 import { cache } from '../utils/cache.js';
 import { withErrorHandling, truncate } from '../utils/errors.js';
+import { findVideoInfo } from '../utils/media.js';
 import type { PdpResponse, PdpPriceValue } from '../api/types.js';
 
 // Shopee stores prices as the real amount × 100000.
@@ -109,6 +110,7 @@ export function registerProductTools(server: McpServer): void {
           review?.global_sold_display;
         const breadcrumb = (item.categories ?? []).map((c) => c.display_name).join(' › ');
         const stock = item.stock ?? item.normal_stock ?? undefined;
+        const video = findVideoInfo(data);
 
         const lines: string[] = [
           `📦 **${item.title}**`,
@@ -118,6 +120,9 @@ export function registerProductTools(server: McpServer): void {
           `📊 **Stats:**`,
           `  ⭐ Rating: ${rating ? rating.toFixed(2) : 'N/A'}${ratingCount ? ` (${ratingCount.toLocaleString('id-ID')} reviews)` : ''}`,
           soldText ? `  ✅ Sold: ${soldText}` : '',
+          video
+            ? `  🎬 Video: ${video.url ? video.url : 'present (no direct URL in payload)'}`
+            : '',
           '',
           `📋 **Details:**`,
           item.brand ? `  🏷 Brand: ${item.brand}` : '',

@@ -1,12 +1,13 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { withBrowserLock, BASE_URL } from '../browser/session.js';
+import { BASE_URL } from '../browser/session.js';
+import { captureWithNames } from '../api/capture-dom.js';
 import { cache } from '../utils/cache.js';
 import { withErrorHandling } from '../utils/errors.js';
 import type { SearchItemsResponse, SearchItem, ItemBasic } from '../api/types.js';
 
 /** A product card as the 2026 search page ships it: item_basic (legacy) OR item_data. */
-type SearchCard = SearchItem & {
+export type SearchCard = SearchItem & {
   item_data?: {
     itemid?: number;
     shopid?: number;
@@ -122,82 +123,6 @@ const SORT_MAP: Record<string, { sortBy: string; order?: string }> = {
   price_high: { sortBy: 'price', order: 'desc' },
 };
 
-/**
- * Run one search: capture the `search_items` response AND the rendered product
- * names from the page DOM (matched by `shopid:itemid` from tile hrefs — the
- * 2026 card API no longer carries the product name). One lock round-trip.
- */
-async function searchOnce(
-  searchUrl: string,
-): Promise<{ data: SearchItemsResponse; names: Record<string, string> }> {
-  return withBrowserLock(async () => {
-    const { getPageFor } = await import('../browser/session.js');
-    const page = await getPageFor('buyer');
-
-    const result = await new Promise<{ json: SearchItemsResponse; matchedUrl: string }>(
-      (resolve, reject) => {
-        let settled = false;
-        const finish = (fn: () => void): void => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timer);
-          page.off('response', handler);
-          fn();
-        };
-        const timer = setTimeout(
-          () =>
-            finish(() => reject(new Error('Timeout 30000ms exceeded waiting for search_items'))),
-          30000,
-        );
-        const handler = (r: { url(): string; text(): Promise<string> }): void => {
-          if (!r.url().includes('/api/v4/search/search_items')) return;
-          void r
-            .text()
-            .then((text) => {
-              try {
-                finish(() => resolve({ json: JSON.parse(text), matchedUrl: r.url() }));
-              } catch {
-                /* keep listening */
-              }
-            })
-            .catch(() => {});
-        };
-        page.on('response', handler);
-        page
-          .goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
-          .catch((err) => finish(() => reject(err)));
-      },
-    );
-
-    // The names only exist in the rendered tiles — the API response arrives
-    // BEFORE the DOM paints, so wait for a product link to appear first.
-    await page
-      .waitForSelector('a[href*="/product/"], a[href*="-i."]', { timeout: 8000 })
-      .catch(() => {});
-    await page.waitForTimeout(800);
-
-    const names = await page
-      .evaluate(() => {
-        const map: Record<string, string> = {};
-        for (const a of Array.from(document.querySelectorAll('a[href]'))) {
-          const href = a.getAttribute('href') ?? '';
-          const m = href.match(/-i\.(\d+)\.(\d+)/) ?? href.match(/\/product\/(\d+)\/(\d+)/);
-          if (!m) continue;
-          const key = `${m[1]}:${m[2]}`;
-          if (map[key]) continue;
-          const alt = a.querySelector('img')?.getAttribute('alt')?.trim() ?? '';
-          const text = (a.textContent ?? '').replace(/\s+/g, ' ').trim();
-          const name = alt.length >= 8 ? alt : text.length >= 8 ? text : '';
-          if (name) map[key] = name.slice(0, 200);
-        }
-        return map;
-      })
-      .catch(() => ({}) as Record<string, string>);
-
-    return { data: result.json, names };
-  });
-}
-
 export function registerSearchTools(server: McpServer): void {
   server.tool(
     'search_products',
@@ -237,7 +162,10 @@ export function registerSearchTools(server: McpServer): void {
         let hits: SearchHit[] = [];
         let names: Record<string, string> | undefined;
         for (let attempt = 0; attempt < 3 && hits.length === 0; attempt++) {
-          const run = await searchOnce(searchUrl);
+          const run = await captureWithNames<SearchItemsResponse>(
+            searchUrl,
+            '/api/v4/search/search_items',
+          );
           data = run.data;
           names = run.names;
           hits = flattenSearchCards(data.items as SearchCard[]);
