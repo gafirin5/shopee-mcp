@@ -14,6 +14,7 @@ import { registerSellerShopTools } from './tools/seller/shop.js';
 import { registerSellerOrderTools } from './tools/seller/orders.js';
 import { registerSellerProductTools } from './tools/seller/products.js';
 import { registerSellerVideoTools } from './tools/seller/video.js';
+import { registerSellerModifyTools } from './tools/seller/modify.js';
 import { closeContext } from './browser/session.js';
 
 // Read the version from package.json at runtime so it can't drift from the
@@ -43,6 +44,7 @@ async function main() {
   registerSellerOrderTools(server);
   registerSellerProductTools(server);
   registerSellerVideoTools(server);
+  registerSellerModifyTools(server);
 
   const transport = new StdioServerTransport();
   await server.connect(transport);

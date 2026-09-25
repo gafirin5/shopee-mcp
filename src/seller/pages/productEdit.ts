@@ -28,6 +28,12 @@ export const SEL = {
   saveButton: 'button:has-text("Simpan"), button:has-text("Save"), button:has-text("保存")',
   /** Success toast after saving. */
   successToast: 'text=/berhasil|success|saved|tersimpan|更新成功/i',
+  /** Price inputs on the edit page (base price first; variation rows follow). */
+  priceInput:
+    '[class*="price" i] input[type="text"], [class*="price" i] input:not([type])',
+  /** Stock inputs on the edit page (per model when variations exist). */
+  stockInput:
+    '[class*="stock" i] input[type="text"], [class*="stock" i] input:not([type])',
 } as const;
 
 /** Open the product edit page for a marketplace itemid. */
@@ -94,4 +100,23 @@ export async function saveProduct(page: Page): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * Locate the price inputs. Index 0 is the base price on simple products; on
+ * variation products the inputs map to variation rows in DOM order.
+ */
+export async function getPriceInputs(page: Page): Promise<Locator[]> {
+  const loc = page.locator(SEL.priceInput);
+  const n = await loc.count();
+  if (!n) throw new Error('No price input found — selector drift or wrong page (see screenshot).');
+  return Array.from({ length: n }, (_, i) => loc.nth(i));
+}
+
+/** Locate the stock inputs, same mapping as getPriceInputs. */
+export async function getStockInputs(page: Page): Promise<Locator[]> {
+  const loc = page.locator(SEL.stockInput);
+  const n = await loc.count();
+  if (!n) throw new Error('No stock input found — selector drift or wrong page (see screenshot).');
+  return Array.from({ length: n }, (_, i) => loc.nth(i));
 }
