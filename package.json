@@ -18,13 +18,15 @@
   "homepage": "https://github.com/bintangtimurlangit/shopee-mcp#readme",
   "bin": {
     "shopee-mcp": "build/index.js",
-    "shopee-mcp-login": "build/login.js"
+    "shopee-mcp-login": "build/login.js",
+    "shopee-mcp-seller-login": "build/login-seller.js"
   },
   "scripts": {
     "clean": "node -e \"require('fs').rmSync('build',{recursive:true,force:true})\"",
     "prebuild": "npm run clean",
     "build": "tsc",
     "login": "tsx src/login.ts",
+    "login:seller": "tsx src/login-seller.ts",
     "dev": "tsx watch src/index.ts",
     "start": "node build/index.js",
     "typecheck": "tsc --noEmit",

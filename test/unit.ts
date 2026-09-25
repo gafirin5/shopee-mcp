@@ -9,6 +9,9 @@ import { flattenSearchItems, formatPrice } from '../src/tools/search.js';
 import { parseProductUrl } from '../src/tools/product.js';
 import { shopeeCapture, ShopeeAuthRequiredError } from '../src/api/client.js';
 import { cache } from '../src/utils/cache.js';
+import { findArray, previewRow, formatSellerPayload } from '../src/tools/seller/format.js';
+import { findVideoInfo } from '../src/utils/media.js';
+import { summarizeJson } from '../src/utils/json.js';
 import type { SearchItem, ItemBasic } from '../src/api/types.js';
 
 let failures = 0;
@@ -168,7 +171,7 @@ test('shopeeCapture: recovers from a single timeout via retry, no auth error', a
   const flakyCapture = async () => {
     calls++;
     if (calls === 1) throw new Error('Timeout 30000ms exceeded');
-    return { error: 0, items: [] };
+    return { json: { error: 0, items: [] }, matchedUrl: 'https://x/api/v4/search' };
   };
   const result = await shopeeCapture(
     'https://x',
@@ -192,6 +195,110 @@ test('shopeeCapture: reports auth-required only after a second consecutive timeo
     ShopeeAuthRequiredError,
   );
   assert.equal(calls, 2);
+});
+
+// ─── seller list formatting (findArray / previewRow / formatSellerPayload) ──
+
+test('findArray: finds the array under a known key', () => {
+  const payload = { error: 0, data: { order_list: [{ order_id: 1 }] } };
+  assert.deepEqual(findArray(payload, ['orders', 'order_list']), [{ order_id: 1 }]);
+});
+
+test('findArray: searches wrapper objects when the key misses at the root', () => {
+  const payload = { result: { content: [{ id: 9 }] } };
+  assert.deepEqual(findArray(payload, ['list', 'content']), [{ id: 9 }]);
+});
+
+test('findArray: returns undefined for array-less payloads', () => {
+  assert.equal(findArray({ error: 0 }, ['list']), undefined);
+  assert.equal(findArray(null, ['list']), undefined);
+});
+
+test('previewRow: renders the common fields it finds', () => {
+  const line = previewRow({
+    order_id: 123,
+    item_name: 'Kaos Polos',
+    order_status: 'UNPAID',
+    total_amount: 150000,
+    quantity: 2,
+  });
+  assert.match(line, /Kaos Polos/);
+  assert.match(line, /#123/);
+  assert.match(line, /UNPAID/);
+  assert.match(line, /amount=150000/);
+  assert.match(line, /qty=2/);
+});
+
+test('previewRow: falls back to a JSON snippet for unknown shapes', () => {
+  const line = previewRow({ weird_field: true });
+  assert.match(line, /weird_field/);
+});
+
+test('previewRow: handles non-object rows', () => {
+  assert.match(previewRow('plain string'), /plain string/);
+});
+
+test('formatSellerPayload: renders rows when a list is found', () => {
+  const text = formatSellerPayload(
+    '📦 Orders',
+    { data: { order_list: [{ order_id: 1 }, { order_id: 2 }] } },
+    ['order_list'],
+  );
+  assert.match(text, /📦 Orders/);
+  assert.match(text, /#1/);
+  assert.match(text, /#2/);
+});
+
+test('formatSellerPayload: falls back to a raw preview when no list exists', () => {
+  const text = formatSellerPayload('🏪 Shop', { shop_name: 'Toko' }, ['list']);
+  assert.match(text, /shop_name/);
+});
+
+// ─── video detection (findVideoInfo) ────────────────────────────────────────
+
+test('findVideoInfo: finds video_url under video_info', () => {
+  const payload = {
+    error: 0,
+    data: {
+      video_info: {
+        video_url: '//cf.shopee.co.id/video.mp4',
+        video_cover: '//cf.shopee.co.id/cover.jpg',
+      },
+    },
+  };
+  const info = findVideoInfo(payload);
+  assert.ok(info);
+  assert.equal(info.url, 'https://cf.shopee.co.id/video.mp4');
+  assert.equal(info.cover, 'https://cf.shopee.co.id/cover.jpg');
+  assert.match(info.foundAt, /video_info/);
+});
+
+test('findVideoInfo: treats a bare video URL string as a hit', () => {
+  const info = findVideoInfo({ data: { video: 'https://x.example/v.mp4' } });
+  assert.ok(info);
+  assert.equal(info.url, 'https://x.example/v.mp4');
+});
+
+test('findVideoInfo: reports a video-keyed object even without a URL', () => {
+  const info = findVideoInfo({ data: { video_metadata: { duration: 12 } } });
+  assert.ok(info);
+  assert.equal(info.url, undefined);
+  assert.match(info.foundAt, /video_metadata/);
+});
+
+test('findVideoInfo: returns undefined when no video keys exist', () => {
+  assert.equal(findVideoInfo({ data: { name: 'Kaos', price: 1 } }), undefined);
+});
+
+// ─── summarizeJson ──────────────────────────────────────────────────────────
+
+test('summarizeJson: passes short JSON through untouched', () => {
+  assert.equal(summarizeJson({ a: 1 }), '{\n  "a": 1\n}');
+});
+
+test('summarizeJson: truncates long payloads with a note', () => {
+  const text = summarizeJson({ blob: 'x'.repeat(10000) }, 500);
+  assert.match(text, /truncated, \d+ chars total/);
 });
 
 await runTests();

@@ -8,6 +8,12 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { registerSearchTools } from './tools/search.js';
 import { registerProductTools } from './tools/product.js';
 import { registerStatusTools } from './tools/status.js';
+import { registerSellerStatusTools } from './tools/seller/status.js';
+import { registerSellerProbeTools } from './tools/seller/probe.js';
+import { registerSellerShopTools } from './tools/seller/shop.js';
+import { registerSellerOrderTools } from './tools/seller/orders.js';
+import { registerSellerProductTools } from './tools/seller/products.js';
+import { registerSellerVideoTools } from './tools/seller/video.js';
 import { closeContext } from './browser/session.js';
 
 // Read the version from package.json at runtime so it can't drift from the
@@ -23,11 +29,20 @@ async function main() {
     version: pkg.version,
   });
 
-  // Register tool groups. Every tool runs through the shared, logged-in browser
+  // Register tool groups. Buyer tools run through the shared, logged-in browser
   // session (see src/browser/session.ts) — sign in once with `npm run login`.
   registerSearchTools(server);
   registerProductTools(server);
   registerStatusTools(server);
+
+  // Seller Centre realm: portal reads + product write actions on your own shop.
+  // Sign in once with `npm run login:seller` (SSO usually covers it).
+  registerSellerStatusTools(server);
+  registerSellerProbeTools(server);
+  registerSellerShopTools(server);
+  registerSellerOrderTools(server);
+  registerSellerProductTools(server);
+  registerSellerVideoTools(server);
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
