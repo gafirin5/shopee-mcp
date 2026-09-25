@@ -79,7 +79,7 @@ function pageBelongsTo(p: Page, realm: Realm): boolean {
 }
 
 /** The page reused for a given realm — buyer and seller traffic never share one. */
-async function getPageFor(realm: Realm): Promise<Page> {
+export async function getPageFor(realm: Realm): Promise<Page> {
   const ctx = await getContext();
   const open = ctx.pages().filter((p) => !p.isClosed());
   const owned = open.filter((p) => pageBelongsTo(p, realm));

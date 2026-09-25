@@ -29,11 +29,9 @@ export const SEL = {
   /** Success toast after saving. */
   successToast: 'text=/berhasil|success|saved|tersimpan|更新成功/i',
   /** Price inputs on the edit page (base price first; variation rows follow). */
-  priceInput:
-    '[class*="price" i] input[type="text"], [class*="price" i] input:not([type])',
+  priceInput: '[class*="price" i] input[type="text"], [class*="price" i] input:not([type])',
   /** Stock inputs on the edit page (per model when variations exist). */
-  stockInput:
-    '[class*="stock" i] input[type="text"], [class*="stock" i] input:not([type])',
+  stockInput: '[class*="stock" i] input[type="text"], [class*="stock" i] input:not([type])',
 } as const;
 
 /** Open the product edit page for a marketplace itemid. */

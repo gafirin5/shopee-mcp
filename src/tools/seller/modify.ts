@@ -1,6 +1,10 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { updateProductPrice, updateProductStock, setItemListing } from '../../seller/actions/product.js';
+import {
+  updateProductPrice,
+  updateProductStock,
+  setItemListing,
+} from '../../seller/actions/product.js';
 import { withErrorHandling } from '../../utils/errors.js';
 
 const numericArgs = {
@@ -21,7 +25,11 @@ export function registerSellerModifyTools(server: McpServer): void {
     { ...numericArgs, price: z.number().int().min(1).describe('New price in IDR, e.g. 150000') },
     async ({ item_id, variation_index, price }) => {
       return withErrorHandling(async () => {
-        const text = await updateProductPrice({ itemId: item_id, value: price, variationIndex: variation_index });
+        const text = await updateProductPrice({
+          itemId: item_id,
+          value: price,
+          variationIndex: variation_index,
+        });
         return { content: [{ type: 'text', text }] };
       });
     },
@@ -34,7 +42,11 @@ export function registerSellerModifyTools(server: McpServer): void {
     { ...numericArgs, stock: z.number().int().min(0).describe('New stock quantity') },
     async ({ item_id, variation_index, stock }) => {
       return withErrorHandling(async () => {
-        const text = await updateProductStock({ itemId: item_id, value: stock, variationIndex: variation_index });
+        const text = await updateProductStock({
+          itemId: item_id,
+          value: stock,
+          variationIndex: variation_index,
+        });
         return { content: [{ type: 'text', text }] };
       });
     },

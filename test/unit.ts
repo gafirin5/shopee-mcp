@@ -12,6 +12,7 @@ import { cache } from '../src/utils/cache.js';
 import { findArray, previewRow, formatSellerPayload } from '../src/tools/seller/format.js';
 import { findVideoInfo } from '../src/utils/media.js';
 import { summarizeJson } from '../src/utils/json.js';
+import { parseProductRef } from '../src/tools/research.js';
 import type { SearchItem, ItemBasic } from '../src/api/types.js';
 
 let failures = 0;
@@ -299,6 +300,41 @@ test('summarizeJson: passes short JSON through untouched', () => {
 test('summarizeJson: truncates long payloads with a note', () => {
   const text = summarizeJson({ blob: 'x'.repeat(10000) }, 500);
   assert.match(text, /truncated, \d+ chars total/);
+});
+
+// ─── parseProductRef (compare_prices input) ─────────────────────────────────
+
+test('parseProductRef: parses a full marketplace URL', () => {
+  assert.deepEqual(parseProductRef('https://shopee.co.id/Product-i.78730497.47060432055'), {
+    shopId: '78730497',
+    itemId: '47060432055',
+  });
+});
+
+test('parseProductRef: parses a shopid:itemid pair', () => {
+  assert.deepEqual(parseProductRef('78730497:47060432055'), {
+    shopId: '78730497',
+    itemId: '47060432055',
+  });
+});
+
+test('parseProductRef: pairs tolerate spaces and | separators', () => {
+  assert.deepEqual(parseProductRef(' 78730497 | 47060432055 '), {
+    shopId: '78730497',
+    itemId: '47060432055',
+  });
+});
+
+test('parseProductRef: a bare itemid needs a default shop id', () => {
+  assert.equal(parseProductRef('47060432055'), null);
+  assert.deepEqual(parseProductRef('47060432055', '78730497'), {
+    shopId: '78730497',
+    itemId: '47060432055',
+  });
+});
+
+test('parseProductRef: rejects garbage', () => {
+  assert.equal(parseProductRef('not-a-product'), null);
 });
 
 await runTests();

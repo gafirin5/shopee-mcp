@@ -103,12 +103,16 @@ export async function setItemListing(itemId: string, list: boolean): Promise<str
     await sw.click();
     await page.waitForTimeout(800);
     // The portal may ask for confirmation on unlist.
-    const confirm = page.locator('button:has-text("Ya"), button:has-text("OK"), button:has-text("Konfirmasi")').first();
+    const confirm = page
+      .locator('button:has-text("Ya"), button:has-text("OK"), button:has-text("Konfirmasi")')
+      .first();
     if (await confirm.isVisible().catch(() => false)) {
       await confirm.click();
       await page.waitForTimeout(500);
     }
-    return `✅ Toggled product ${itemId} to ${list ? 'listed (on sale)' : 'unlisted'}. ` +
-      'Verify on the product list — the switch state is the source of truth.';
+    return (
+      `✅ Toggled product ${itemId} to ${list ? 'listed (on sale)' : 'unlisted'}. ` +
+      'Verify on the product list — the switch state is the source of truth.'
+    );
   });
 }

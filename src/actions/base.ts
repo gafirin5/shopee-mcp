@@ -64,10 +64,23 @@ export async function withSellerAction<T>(
   name: string,
   fn: (page: Page) => Promise<T>,
 ): Promise<T> {
+  return withRealmAction(name, 'seller', fn);
+}
+
+/** Same contract as withSellerAction, for write actions on the buyer realm. */
+export async function withBuyerAction<T>(name: string, fn: (page: Page) => Promise<T>): Promise<T> {
+  return withRealmAction(name, 'buyer', fn);
+}
+
+async function withRealmAction<T>(
+  name: string,
+  realm: 'buyer' | 'seller',
+  fn: (page: Page) => Promise<T>,
+): Promise<T> {
   return withBrowserLock(async () => {
     // Imported lazily to avoid a circular import: session → (nothing), actions → session.
-    const { getSellerPage } = await import('../browser/session.js');
-    const page = await getSellerPage();
+    const { getPageFor } = await import('../browser/session.js');
+    const page = await getPageFor(realm);
     try {
       return await fn(page);
     } catch (err) {

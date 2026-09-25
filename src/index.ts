@@ -15,6 +15,9 @@ import { registerSellerOrderTools } from './tools/seller/orders.js';
 import { registerSellerProductTools } from './tools/seller/products.js';
 import { registerSellerVideoTools } from './tools/seller/video.js';
 import { registerSellerModifyTools } from './tools/seller/modify.js';
+import { registerSellerChatTools } from './tools/seller/chat.js';
+import { registerResearchTools } from './tools/research.js';
+import { registerShopeeVideoTools } from './tools/shopeeVideo.js';
 import { closeContext } from './browser/session.js';
 
 // Read the version from package.json at runtime so it can't drift from the
@@ -45,6 +48,12 @@ async function main() {
   registerSellerProductTools(server);
   registerSellerVideoTools(server);
   registerSellerModifyTools(server);
+  registerSellerChatTools(server);
+
+  // Research tools run on the buyer realm (reviews, competitor prices).
+  registerResearchTools(server);
+  // Shopee Video feed (web availability is probed first — app-first feature).
+  registerShopeeVideoTools(server);
 
   const transport = new StdioServerTransport();
   await server.connect(transport);

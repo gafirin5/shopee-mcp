@@ -30,7 +30,10 @@ export async function openProductList(page: Page, query?: string): Promise<void>
  * Find the row for a product id and return its on/off-sale switch locator.
  * The portal search box is unreliable to drive, so we scan rows for the id text.
  */
-export async function findRowSwitch(page: Page, itemId: string): Promise<ReturnType<Page['locator']>> {
+export async function findRowSwitch(
+  page: Page,
+  itemId: string,
+): Promise<ReturnType<Page['locator']>> {
   const rows = page.locator(LIST_SEL.productRow);
   const n = await rows.count();
   for (let i = 0; i < n; i++) {
