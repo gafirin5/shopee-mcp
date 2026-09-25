@@ -3,33 +3,43 @@ import { SELLER_BASE_URL } from '../browser/session.js';
 /**
  * Seller Centre URL builders.
  *
- * Shopee rotates portal paths between regions/UI generations more often than it
- * rotates the marketplace. These constants are best-guess defaults for the
- * current Indonesian Seller Centre; every tool that navigates accepts an
- * explicit `path` override, and `seller_api_probe` exists to discover what the
- * live portal actually uses when a default drifts.
+ * Paths below were verified LIVE against the 2026 Indonesian portal by
+ * extracting the sidebar menu (scripts/probe-seller3.ts): the old
+ * /portal/order/list and /portal/product/list pages are 404 now.
+ *
+ * Known 2026 paths: orders /portal/sale/order, products
+ * /portal/product/list/live/all, chat /portal/chat-management, income
+ * /portal/finance/income, marketing /portal/marketing, analytics lives in a
+ * separate /datacenter/ app. New shops are redirected to
+ * /portal/id-onboarding/qr-code until onboarding is completed — page UI is
+ * gated but the shell and its API calls still fire, which is why the capture
+ * tools keep working.
  */
 export function sellerUrl(pathAndQuery: string): string {
   return `${SELLER_BASE_URL}${pathAndQuery.startsWith('/') ? '' : '/'}${pathAndQuery}`;
 }
 
 export const SELLER_PATHS = {
-  /** Portal landing — also our seller-login probe target. */
-  home: '/portal/',
+  /** Shell page that reliably loads the portal app (fires selleraccount APIs). */
+  home: '/portal/sale/order',
   /** My Income / balance snapshot. */
-  income: '/portal/income',
-  /** Order management. */
-  orderList: '/portal/order/list',
-  orderToShip: '/portal/order/list?list_type=to_ship',
+  income: '/portal/finance/income',
+  /** Order management (tabs are `?type=toship|shipped|completed|…`). */
+  orderList: '/portal/sale/order',
   /** Product management. */
-  productList: '/portal/product/list',
-  productDraft: '/portal/product/list/draft',
-  /** Product edit page (new portal uses /portal/product/<id>). */
+  productList: '/portal/product/list/live/all',
+  /**
+   * Product edit page — UNVERIFIED (verified against a shop with zero
+   * products). If the real path differs, pass an explicit edit path override
+   * or update this builder after checking the edit page URL once.
+   */
   productEdit: (productId: string) => `/portal/product/${productId}`,
-  /** Chat / conversations. */
-  chat: '/portal/chat',
+  /** Chat management. */
+  chat: '/portal/chat-management',
   /** Marketing & promotions. */
   marketing: '/portal/marketing',
-  /** Shop performance / analytics dashboard. */
-  analytics: '/portal/data/homepage',
+  /** Business insight lives in a separate datacenter app. */
+  analytics: '/datacenter/',
+  /** Onboarding gate for brand-new shops. */
+  onboarding: '/portal/id-onboarding/qr-code',
 } as const;

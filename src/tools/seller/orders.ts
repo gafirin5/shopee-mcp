@@ -5,34 +5,32 @@ import { SELLER_PATHS } from '../../seller/urls.js';
 import { withErrorHandling } from '../../utils/errors.js';
 import { formatSellerPayload } from './format.js';
 
+// Verified live (2026 portal): the order page fires POST
+// /api/v3/order/search_order_list_index — but that endpoint carries anti-fraud
+// headers (af-ac-enc-sz-token), so we capture the app's own response instead
+// of calling it directly. The page fires it even while a brand-new shop is
+// being redirected to onboarding.
 const ORDER_LIST_CANDIDATES = [
+  '/order/search_order_list_index',
+  '/order/get_order_list_meta_v2',
   '/order_list/get_order_list',
-  '/get_order_list',
   '/api/v1/orders',
-  '/order/get_order_list',
 ];
 
-const ORDER_DETAIL_CANDIDATES = [
-  '/order_detail/get_order_detail',
-  '/get_order_info',
-  '/order/get_order_info',
-  '/order/detail',
-];
-
-const LIST_ARRAY_KEYS = ['order_list', 'orders', 'list', 'data'];
+const LIST_ARRAY_KEYS = ['order_list', 'index_list', 'orders', 'list', 'data'];
 const DETAIL_ARRAY_KEYS = ['order_detail', 'item_list', 'package_list', 'list'];
 
 export function registerSellerOrderTools(server: McpServer): void {
   server.tool(
     'list_orders',
-    'List orders from the Shopee Seller Centre portal (default: all/newest first). ' +
-      'Read-only capture of the portal page the app itself loads.',
+    'List orders from the Shopee Seller Centre portal (/portal/sale/order). ' +
+      'Captures the search_order_list_index response the page itself fires. ' +
+      'A brand-new shop still on the onboarding gate returns an empty list.',
     {
       list_type: z
         .enum(['all', 'to_ship', 'shipped', 'completed', 'cancelled', 'return_refund'])
         .default('all')
         .describe('Which order bucket to open (default: all)'),
-      page: z.number().int().min(1).default(1).describe('Page number (default: 1)'),
       max_rows: z
         .number()
         .int()
@@ -41,20 +39,25 @@ export function registerSellerOrderTools(server: McpServer): void {
         .default(20)
         .describe('Max rows to render (default: 20)'),
     },
-    async ({ list_type, page, max_rows }) => {
+    async ({ list_type, max_rows }) => {
       return withErrorHandling(async () => {
-        const qs = new URLSearchParams({ page: String(page) });
-        if (list_type !== 'all') qs.set('list_type', list_type);
-        const json = await sellerCapture<Record<string, unknown>>(
-          `${SELLER_PATHS.orderList}?${qs.toString()}`,
-          ORDER_LIST_CANDIDATES,
-        );
+        const typeParam: Record<string, string | undefined> = {
+          all: undefined,
+          to_ship: 'toship',
+          shipped: 'shipped',
+          completed: 'completed',
+          cancelled: 'cancelled',
+          return_refund: 'returnrefund',
+        };
+        const type = typeParam[list_type];
+        const path = type ? `${SELLER_PATHS.orderList}?type=${type}` : SELLER_PATHS.orderList;
+        const json = await sellerCapture<Record<string, unknown>>(path, ORDER_LIST_CANDIDATES);
         return {
           content: [
             {
               type: 'text',
               text: formatSellerPayload(
-                `📦 Seller Orders (${list_type}, page ${page})`,
+                `📦 Seller Orders (${list_type})`,
                 json,
                 LIST_ARRAY_KEYS,
                 max_rows,
@@ -74,8 +77,8 @@ export function registerSellerOrderTools(server: McpServer): void {
     },
     async ({ order_id }) => {
       return withErrorHandling(async () => {
-        const path = `/portal/order/detail?order_id=${encodeURIComponent(order_id)}`;
-        const json = await sellerCapture<Record<string, unknown>>(path, ORDER_DETAIL_CANDIDATES);
+        const path = `/portal/sale/order/detail?order_id=${encodeURIComponent(order_id)}`;
+        const json = await sellerCapture<Record<string, unknown>>(path, ORDER_LIST_CANDIDATES);
         return {
           content: [
             {

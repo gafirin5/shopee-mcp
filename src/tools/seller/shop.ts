@@ -1,32 +1,33 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { portalApi } from '../../seller/api.js';
 import { sellerCapture } from '../../seller/capture.js';
 import { SELLER_PATHS } from '../../seller/urls.js';
 import { withErrorHandling } from '../../utils/errors.js';
 import { formatSellerPayload } from './format.js';
 
-// The portal fires one of these depending on UI generation; whichever the live
-// app actually calls is the one we capture. When none match, the tool's error
-// text routes you to seller_api_probe.
-const SHOP_INFO_CANDIDATES = [
-  '/shop/info',
-  '/get_shop_info',
-  '/shop/get_shop_info',
-  '/user/get_user_info',
-  '/account/info',
-];
+// Verified live (2026 portal): the shell fires /api/selleraccount/shop_info/
+// on every portal page. Older candidates are kept as capture fallbacks.
+const SHOP_INFO_API = '/api/selleraccount/shop_info/';
 
 export function registerSellerShopTools(server: McpServer): void {
   server.tool(
     'get_seller_shop_info',
     'Fetch the logged-in shop profile from the Shopee Seller Centre portal ' +
-      '(shop name, account, status). Requires the seller session (npm run login:seller).',
+      '(shop name, id, region, status). Direct portal-API call — works even while ' +
+      'a brand-new shop is still on the onboarding gate.',
     {},
     async () => {
       return withErrorHandling(async () => {
-        const json = await sellerCapture<Record<string, unknown>>(
-          SELLER_PATHS.home,
-          SHOP_INFO_CANDIDATES,
-        );
+        let json: Record<string, unknown>;
+        try {
+          json = await portalApi<Record<string, unknown>>(SHOP_INFO_API);
+        } catch {
+          // Fallback: capture whatever the portal shell fires.
+          json = await sellerCapture<Record<string, unknown>>(SELLER_PATHS.home, [
+            '/selleraccount/shop_info',
+            '/selleraccount/user_info',
+          ]);
+        }
         return {
           content: [{ type: 'text', text: formatSellerPayload('🏪 Seller Shop Info', json, []) }],
         };
@@ -37,15 +38,15 @@ export function registerSellerShopTools(server: McpServer): void {
   server.tool(
     'get_seller_income',
     'Fetch the wallet/income summary page from the Seller Centre portal ' +
-      '(balance snapshot shown on the income page).',
+      '(/portal/finance/income — balance snapshot the income page loads).',
     {},
     async () => {
       return withErrorHandling(async () => {
         const json = await sellerCapture<Record<string, unknown>>(SELLER_PATHS.income, [
-          '/income',
+          '/finance/income',
+          '/income/',
           '/wallet',
           '/balance',
-          '/payment',
         ]);
         return {
           content: [
@@ -65,16 +66,16 @@ export function registerSellerShopTools(server: McpServer): void {
 
   server.tool(
     'get_seller_analytics',
-    'Fetch the shop performance dashboard from the Seller Centre portal ' +
-      '(visits, orders, sales snapshot for the default period).',
+    'Fetch the shop performance dashboard from the Seller Centre (business insight ' +
+      'lives in the separate /datacenter/ app — this captures what it loads).',
     {},
     async () => {
       return withErrorHandling(async () => {
         const json = await sellerCapture<Record<string, unknown>>(SELLER_PATHS.analytics, [
+          '/datacenter',
           '/data/',
           '/analytics',
           '/performance',
-          '/dashboard',
         ]);
         return {
           content: [
@@ -91,7 +92,7 @@ export function registerSellerShopTools(server: McpServer): void {
   server.tool(
     'get_seller_marketing',
     'Fetch the marketing/promotions overview from the Seller Centre portal ' +
-      '(active campaigns snapshot).',
+      '(/portal/marketing — active campaigns snapshot).',
     {},
     async () => {
       return withErrorHandling(async () => {

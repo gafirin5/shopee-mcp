@@ -75,10 +75,17 @@ export function registerSearchTools(server: McpServer): void {
         if (order) qs.set('order', order);
         const searchUrl = shopeeUrl(`/search?${qs.toString()}`);
 
-        const data = await shopeeCapture<SearchItemsResponse>(searchUrl, 'search/search_items');
-
-        const items = flattenSearchItems(data.items);
-        if (items.length === 0) {
+        // The search page fires search_items more than once (suggestion prefill
+        // before the real results) and the first response can carry total_count
+        // with an empty item list — verified live. Re-capture until items show
+        // up (bounded) before declaring "no results".
+        let data: SearchItemsResponse | undefined;
+        let items: ItemBasic[] = [];
+        for (let attempt = 0; attempt < 3 && items.length === 0; attempt++) {
+          data = await shopeeCapture<SearchItemsResponse>(searchUrl, 'search/search_items');
+          items = flattenSearchItems(data.items);
+        }
+        if (!data || items.length === 0) {
           return {
             content: [
               { type: 'text', text: `No products found for "${query}". Try a different keyword.` },

@@ -22,7 +22,9 @@ export const CHAT_SEL = {
   messageBubble: '[class*="message" i][class*="item" i], [class*="msg" i][class*="text" i]',
 } as const;
 
-export const CHAT_PATHS = ['/chat/pc', '/chat', '/portal/chat'];
+// Verified from the 2026 sidebar: /portal/chat-management is the chat entry;
+// the webchat API surface (webchat/api/…) lives under the same subdomain.
+export const CHAT_PATHS = ['/portal/chat-management', '/chat/pc', '/chat', '/portal/chat'];
 
 /** Open the chat app, trying each known mount path until one renders. */
 export async function openChat(page: Page): Promise<string> {

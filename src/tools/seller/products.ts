@@ -1,25 +1,22 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import { portalApi } from '../../seller/api.js';
 import { sellerCapture } from '../../seller/capture.js';
 import { SELLER_PATHS } from '../../seller/urls.js';
 import { withErrorHandling } from '../../utils/errors.js';
 import { formatSellerPayload } from './format.js';
 
-const PRODUCT_LIST_CANDIDATES = [
-  '/product/get_products',
-  '/get_products',
-  '/api/v1/products',
-  '/product_list/get',
-  '/product/list/get',
-];
-
-const PRODUCT_ARRAY_KEYS = ['product_list', 'items', 'list', 'products'];
+// Verified live (2026 portal): the product list page fires
+// GET /api/v3/opt/mpsku/list/v2/get_product_list — no anti-fraud headers, so
+// we call it directly and fall back to capture if the direct call is refused.
+const PRODUCT_LIST_API = '/api/v3/opt/mpsku/list/v2/get_product_list';
+const PRODUCT_ARRAY_KEYS = ['product_list', 'list', 'items', 'products'];
 
 export function registerSellerProductTools(server: McpServer): void {
   server.tool(
     'list_seller_products',
-    'List the shop products from the Seller Centre portal (names, ids, price/stock if present). ' +
-      'Read-only capture of the product list page the portal app itself loads.',
+    'List the shop products from the Seller Centre portal (direct API call to the ' +
+      'mpsku product list — works even while a brand-new shop is on the onboarding gate).',
     {
       page: z.number().int().min(1).default(1).describe('Page number (default: 1)'),
       max_rows: z
@@ -32,10 +29,17 @@ export function registerSellerProductTools(server: McpServer): void {
     },
     async ({ page, max_rows }) => {
       return withErrorHandling(async () => {
-        const json = await sellerCapture<Record<string, unknown>>(
-          `${SELLER_PATHS.productList}?page=${page}`,
-          PRODUCT_LIST_CANDIDATES,
-        );
+        let json: Record<string, unknown>;
+        try {
+          json = await portalApi<Record<string, unknown>>(
+            `${PRODUCT_LIST_API}?page_number=${page}&page_size=${max_rows}`,
+          );
+        } catch {
+          json = await sellerCapture<Record<string, unknown>>(
+            `${SELLER_PATHS.productList}?page=${page}`,
+            ['/mpsku/list/v2/get_product_list', '/mpsku/list/v2/search_product_list'],
+          );
+        }
         return {
           content: [
             {
