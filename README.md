@@ -29,6 +29,29 @@ Per the [MCP annotations spec](https://modelcontextprotocol.io/) — all tools a
 | `get_product_detail` |     ✓     |     ✓      |      –      |
 | `check_login_status` |     ✓     |     ✓      |      –      |
 
+## Seller Centre & write tools (this fork)
+
+Beyond the read-only discovery tools above, this build adds a **Seller Centre realm** (`seller.shopee.co.id`, same browser profile — the portal usually SSOs in) and **UI write actions**. Sign in once with `npm run login:seller` if the portal doesn't SSO automatically.
+
+| Tool                                                                                           | What it does                                                                                              |
+| ---------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `check_seller_login`                                                                           | Whether the Seller Centre portal is reachable with the current session.                                   |
+| `seller_api_probe`                                                                             | Navigate any portal page and capture the first matching XHR JSON — endpoint discovery.                    |
+| `get_seller_shop_info` / `get_seller_income` / `get_seller_analytics` / `get_seller_marketing` | Portal reads (shop, wallet, performance, campaigns).                                                      |
+| `list_orders` / `get_order_detail`                                                             | Order management reads from the portal.                                                                   |
+| `list_seller_products`                                                                         | Your product list with ids, price/stock when present.                                                     |
+| `upload_product_video`                                                                         | **Upload a video file to a listing** via the edit page (MP4/MOV), waits for processing, saves.            |
+| `remove_product_video`                                                                         | Delete a listing's video, then save.                                                                      |
+| `check_product_video`                                                                          | Read-only check (buyer side) whether a listing currently has video media.                                 |
+| `update_price` / `update_stock`                                                                | Edit price/stock on the edit page; variation products via 0-based `variation_index`.                      |
+| `list_item` / `unlist_item`                                                                    | Flip the on/off-sale switch on the product list page.                                                     |
+| `list_chats` / `read_chat` / `send_chat_reply`                                                 | Buyer chat: list conversations, read a thread, send one reply.                                            |
+| `get_product_reviews`                                                                          | Buyer-side review capture (scrolls the PDP so the ratings XHR fires).                                     |
+| `compare_prices`                                                                               | Current prices for up to 10 product refs (URL or `shopid:itemid`), 2s gap between items.                  |
+| `shopee_video_probe` / `post_shopee_video`                                                     | Shopee Video feed posting — probes the web uploader first (app-first feature; refuses cleanly if absent). |
+
+Write tools (`upload_product_video`, `update_price`, `update_stock`, `list_item`, `unlist_item`, `send_chat_reply`, `post_shopee_video`) are **not** read-only: they act on your own shop, one action per call, with a politeness delay between UI steps. Every failing action saves a screenshot to `~/.shopee-mcp/debug/` so a UI drift is diagnosable; portal selectors are centralised in `src/seller/pages/*` and `src/actions/*` for one-line fixes.
+
 ## Why a browser?
 
 Shopee does **not** expose an open API or server-rendered product HTML. Its `/api/v4/*` endpoints are guarded by an anti-fraud gate (`error 90309999`) that requires per-request signature headers (`af-ac-enc-dat`, `x-sap-sec`, …) minted by Shopee's own obfuscated SDK. Plain `fetch`, headless Chromium, and even a hand-rolled fetch from inside the page all get rejected.
