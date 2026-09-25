@@ -21,15 +21,18 @@ export async function portalApi<T>(
     const { getPageFor } = await import('../browser/session.js');
     const page: Page = await getPageFor('seller');
 
-    // The SPC_CDS cookie exists on any seller-subdomain page; land once if the
-    // page isn't there yet.
-    if (!page.url().includes('seller.')) {
-      await page.goto(sellerUrl('/portal/sale/order'), {
+    // The SPC_CDS cookie exists on any seller-subdomain page. Land on the
+    // onboarding page — the redirect TARGET for new shops, so it is stable and
+    // never bounces — then let any in-flight client-side redirect settle
+    // before fetching: a fetch fired mid-navigation dies with the page.
+    if (!page.url().includes('seller.') || !page.url().includes('/portal/id-onboarding/')) {
+      await page.goto(sellerUrl('/portal/id-onboarding/qr-code'), {
         waitUntil: 'domcontentloaded',
         timeout: 45000,
       });
-      await page.waitForTimeout(2000);
     }
+    await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+    await page.waitForTimeout(1000);
 
     const result = await page.evaluate(
       async ({ p, method, body }) => {

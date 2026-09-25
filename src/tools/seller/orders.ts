@@ -51,7 +51,14 @@ export function registerSellerOrderTools(server: McpServer): void {
         };
         const type = typeParam[list_type];
         const path = type ? `${SELLER_PATHS.orderList}?type=${type}` : SELLER_PATHS.orderList;
-        const json = await sellerCapture<Record<string, unknown>>(path, ORDER_LIST_CANDIDATES);
+        // Generous timeout: a shop on the onboarding gate loads slowly and may
+        // fire the order API late (or never, if the redirect wins — that reads
+        // as an auth-required error, which is accurate guidance).
+        const json = await sellerCapture<Record<string, unknown>>(
+          path,
+          ORDER_LIST_CANDIDATES,
+          45000,
+        );
         return {
           content: [
             {

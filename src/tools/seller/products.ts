@@ -40,6 +40,18 @@ export function registerSellerProductTools(server: McpServer): void {
             ['/mpsku/list/v2/get_product_list', '/mpsku/list/v2/search_product_list'],
           );
         }
+        const data = (json.data ?? json) as Record<string, unknown>;
+        const pageInfo = data.page_info as { total?: number } | undefined;
+        if (pageInfo?.total === 0) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: '🛍️ Seller Products (page 1)\n\nToko belum punya produk (total=0). Tambahkan produk lewat /portal/product/new, lalu coba lagi.',
+              },
+            ],
+          };
+        }
         return {
           content: [
             {

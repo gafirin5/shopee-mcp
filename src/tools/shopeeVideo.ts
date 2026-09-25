@@ -9,8 +9,12 @@ import { withErrorHandling } from '../utils/errors.js';
  * may not expose an upload entry point at all. Rather than promising a flow we
  * cannot see, the probe reports what the live web actually offers and the post
  * tool refuses cleanly when there is no web entry point.
+ *
+ * The real entry point (from the seller sidebar's "Live & Video" item) is the
+ * CREATOR CENTER at /creator-center — on the main shopee.co.id domain, not the
+ * seller subdomain. Video uploads are a creator surface, not Seller Centre.
  */
-const VIDEO_PATH_CANDIDATES = ['/shopee-video', '/video', '/tv', '/shopeevideo'];
+const VIDEO_PATH_CANDIDATES = ['/creator-center', '/shopee-video', '/video', '/tv'];
 
 const SEL = {
   videoInput:

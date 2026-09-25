@@ -28,6 +28,23 @@ export function registerSellerShopTools(server: McpServer): void {
             '/selleraccount/user_info',
           ]);
         }
+        const data = (json.data ?? json) as Record<string, unknown>;
+        const name = typeof data.name === 'string' ? data.name : undefined;
+        if (name) {
+          const flag = (label: string, v: unknown): string =>
+            `   ${v ? '✅' : '—'} ${label}`;
+          const lines = [
+            '🏪 Seller Shop Info',
+            '',
+            `   Nama toko   : ${name}`,
+            `   Shop ID     : ${String(data.shop_id ?? '?')}`,
+            `   Region      : ${String(data.shop_region ?? '?')}`,
+            flag('Official Shop (Mall)', data.official_shop),
+            flag('Toko Mart', data.is_mart_shop),
+            flag('SIP aktif', data.is_sip_primary || data.is_sip_affiliated),
+          ];
+          return { content: [{ type: 'text', text: lines.join('\n') }] };
+        }
         return {
           content: [{ type: 'text', text: formatSellerPayload('🏪 Seller Shop Info', json, []) }],
         };

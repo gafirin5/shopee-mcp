@@ -5,7 +5,7 @@
  * Run with: npm run test:unit
  */
 import assert from 'node:assert/strict';
-import { flattenSearchItems, formatPrice } from '../src/tools/search.js';
+import { flattenSearchCards, flattenSearchItems, formatPrice } from '../src/tools/search.js';
 import { parseProductUrl } from '../src/tools/product.js';
 import { shopeeCapture, ShopeeAuthRequiredError } from '../src/api/client.js';
 import { cache } from '../src/utils/cache.js';
@@ -114,6 +114,61 @@ test('flattenSearchItems: drops null item_basic entries nested in real_items', (
 test('flattenSearchItems: handles null/undefined items list', () => {
   assert.deepEqual(flattenSearchItems(null), []);
   assert.deepEqual(flattenSearchItems(undefined), []);
+});
+
+// ─── flattenSearchCards (2026 item_data shape, verified live) ───────────────
+
+test('flattenSearchCards: maps the new item_data card (name left empty for DOM fill)', () => {
+  const card = {
+    itemid: 1,
+    shopid: 1,
+    item_basic: null as never,
+    item_data: {
+      itemid: 50068259700,
+      shopid: 1643579153,
+      item_card_display_price: {
+        price: 3450000000,
+        strikethrough_price: 12000000000,
+        discount: 71,
+      },
+      item_card_display_sold_count: { historical_sold_count: 0, monthly_sold_count: 0 },
+      item_rating: { rating_star: 0 },
+      shop_data: { shop_name: 'CAVALARY' },
+    },
+  };
+  const hits = flattenSearchCards([card]);
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].itemid, 50068259700);
+  assert.equal(hits[0].price, 3450000000);
+  assert.equal(hits[0].priceBefore, 12000000000);
+  assert.equal(hits[0].shopLocation, 'CAVALARY');
+  assert.equal(hits[0].name, '');
+});
+
+test('flattenSearchCards: still maps the legacy item_basic shape', () => {
+  const b = fakeItemBasic({ itemid: 7, name: 'Kaos' });
+  const hits = flattenSearchCards([{ itemid: 7, shopid: 1, item_basic: b }]);
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].name, 'Kaos');
+  assert.equal(hits[0].sold, 5);
+});
+
+test('flattenSearchCards: unwraps real_items ads cards', () => {
+  const b1 = fakeItemBasic({ itemid: 1 });
+  const card = {
+    itemid: 0,
+    shopid: 0,
+    item_basic: null as never,
+    real_items: [{ item_basic: b1 }],
+  };
+  const hits = flattenSearchCards([card]);
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].itemid, 1);
+});
+
+test('flattenSearchCards: drops dead cards', () => {
+  const dead = { itemid: 0, shopid: 0, item_basic: null as never };
+  assert.deepEqual(flattenSearchCards([dead, null]), []);
 });
 
 // ─── formatPrice ────────────────────────────────────────────────────────────

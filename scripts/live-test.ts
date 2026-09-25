@@ -9,7 +9,7 @@ import { shopeeCapture, shopeeUrl } from '../src/api/client.js';
 import { sellerCapture } from '../src/seller/capture.js';
 import { portalApi } from '../src/seller/api.js';
 import { SELLER_PATHS } from '../src/seller/urls.js';
-import { flattenSearchItems, formatPrice } from '../src/tools/search.js';
+import { flattenSearchCards, formatPrice } from '../src/tools/search.js';
 import { isLoggedIn, isSellerLoggedIn, closeContext } from '../src/browser/session.js';
 import { findVideoInfo } from '../src/utils/media.js';
 import type { SearchItemsResponse } from '../src/api/types.js';
@@ -27,22 +27,22 @@ async function main(): Promise<void> {
   ok('seller portal', String(await isSellerLoggedIn().catch((e) => `ERR ${e.message}`)));
 
   // ── 1. Buyer: keyword search with empty-capture retry (same as the tool) ──
-  let first: ReturnType<typeof flattenSearchItems>[number] | undefined;
+  let first: ReturnType<typeof flattenSearchCards>[number] | undefined;
   try {
-    let items: ReturnType<typeof flattenSearchItems> = [];
+    let hits: ReturnType<typeof flattenSearchCards> = [];
     let totalCount = 0;
-    for (let attempt = 0; attempt < 3 && items.length === 0; attempt++) {
+    for (let attempt = 0; attempt < 3 && hits.length === 0; attempt++) {
       const data = await shopeeCapture<SearchItemsResponse>(
         shopeeUrl('/search?keyword=kaos%20polos&page=0'),
         'search/search_items',
       );
       totalCount = data.total_count ?? 0;
-      items = flattenSearchItems(data.items);
+      hits = flattenSearchCards(data.items as never);
     }
-    first = items[0];
+    first = hits[0];
     ok(
       'search_products',
-      `${totalCount} total | first: ${first?.name?.slice(0, 40) ?? '?'} @ ${first ? formatPrice(first.price, first.currency) : '?'}`,
+      `${totalCount} total | first: ${first?.itemid ?? '?'} @ ${first ? formatPrice(first.price, 'IDR') : '?'} | name via DOM: ${first?.name ? 'yes' : 'not in this script'}`,
     );
   } catch (e) {
     fail('search_products', e);

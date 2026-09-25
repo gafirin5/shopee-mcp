@@ -154,32 +154,70 @@ export interface CaptureResult<T> {
  * whose URL matches `apiMatch` — i.e. the request Shopee's own app fires
  * (carrying the valid anti-fraud signature). Returns the raw parsed JSON;
  * callers inspect its `error` field.
+ *
+ * The body is read inside the response handler the moment the response
+ * arrives: on pages that immediately redirect (e.g. a new shop bounced to
+ * onboarding), Playwright evicts the response resource from the network
+ * buffer before a `waitForResponse(...).json()` would get to read it
+ * ("No resource with given identifier found"). If the body is nonetheless
+ * unreadable, the handler keeps listening for the next matching response.
  */
 export async function captureJson<T>(
   pageUrl: string,
   opts: CaptureOptions,
 ): Promise<CaptureResult<T>> {
   const timeoutMs = opts.timeoutMs ?? 30000;
+  const matchLabel = Array.isArray(opts.apiMatch) ? opts.apiMatch.join('|') : opts.apiMatch;
   return withLock(async () => {
     const page = await getPageFor(opts.realm ?? 'buyer');
 
-    const matched = page.waitForResponse((r: Response) => matchUrl(r.url(), opts), {
-      timeout: timeoutMs,
+    return new Promise<CaptureResult<T>>((resolve, reject) => {
+      let settled = false;
+      const finish = (fn: () => void): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        page.off('response', handler);
+        fn();
+      };
+
+      const timer = setTimeout(() => {
+        finish(() =>
+          reject(new Error(`Timeout ${timeoutMs}ms exceeded waiting for ${matchLabel}`)),
+        );
+      }, timeoutMs);
+
+      const handler = (resp: Response): void => {
+        if (!matchUrl(resp.url(), opts)) return;
+        void resp
+          .text()
+          .then((text) => {
+            try {
+              const json = JSON.parse(text) as T;
+              finish(() => resolve({ json, matchedUrl: resp.url() }));
+            } catch {
+              // Unreadable/evicted body or non-JSON — keep listening for the next match.
+            }
+          })
+          .catch(() => {
+            // Body gone (redirect raced us) — keep listening.
+          });
+      };
+      page.on('response', handler);
+
+      page
+        .goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs })
+        .then(async () => {
+          if (opts.trigger) {
+            try {
+              await opts.trigger(page);
+            } catch (err) {
+              debug(`capture trigger failed (continuing to wait): ${err}`);
+            }
+          }
+        })
+        .catch((err) => finish(() => reject(err)));
     });
-
-    await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
-
-    if (opts.trigger) {
-      try {
-        await opts.trigger(page);
-      } catch (err) {
-        debug(`capture trigger failed (continuing to wait): ${err}`);
-      }
-    }
-
-    const resp = await matched;
-    const json = (await resp.json()) as T;
-    return { json, matchedUrl: resp.url() };
   });
 }
 
