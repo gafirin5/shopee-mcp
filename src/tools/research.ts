@@ -17,11 +17,12 @@ export function parseProductRef(
   ref: string,
   defaultShopId?: string,
 ): { shopId: string; itemId: string } | null {
-  const fromUrl = parseProductUrl(ref);
+  const value = ref.trim();
+  const fromUrl = parseProductUrl(value);
   if (fromUrl) return fromUrl;
-  const pair = ref.match(/^(\d+)\s*[:|,]\s*(\d+)$/);
+  const pair = value.match(/^(\d+)\s*[:|,]\s*(\d+)$/);
   if (pair) return { shopId: pair[1], itemId: pair[2] };
-  if (/^\d+$/.test(ref) && defaultShopId) return { shopId: defaultShopId, itemId: ref };
+  if (/^\d+$/.test(value) && defaultShopId) return { shopId: defaultShopId, itemId: value };
   return null;
 }
 
