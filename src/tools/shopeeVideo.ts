@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { BASE_URL } from '../browser/session.js';
 import { withBuyerAction, stepDelay } from '../actions/base.js';
 import { withErrorHandling } from '../utils/errors.js';
+import { confirmGate } from '../utils/confirm.js';
 
 /**
  * Shopee Video (the short-video feed) is an app-first surface; the web build
@@ -67,67 +68,78 @@ export function registerShopeeVideoTools(server: McpServer): void {
   server.tool(
     'post_shopee_video',
     'Post a video to the Shopee Video feed from the web (caption supports product link text). ' +
-      'Only works if shopee_video_probe finds a web upload entry point; refuses cleanly otherwise.',
+      'Requires confirm=true (a preview is returned otherwise). Only works if ' +
+      'shopee_video_probe finds a web upload entry point; refuses cleanly otherwise.',
     {
       video_path: z.string().min(1).describe('Path to the video file (.mp4/.mov)'),
       caption: z.string().max(2000).describe('Caption text (include product links if any)'),
+      confirm: z.boolean().default(false).describe('Must be true to actually post'),
     },
-    async ({ video_path, caption }) => {
+    async ({ video_path, caption, confirm }) => {
       return withErrorHandling(async () => {
-        const text = await withBuyerAction('post-shopee-video', async (page) => {
-          // 1. Find a live upload path.
-          let opened = false;
-          for (const p of VIDEO_PATH_CANDIDATES) {
-            await page
-              .goto(`${BASE_URL}${p}`, { waitUntil: 'domcontentloaded', timeout: 45000 })
-              .catch(() => {});
-            await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
-            if ((await page.locator(SEL.videoInput).count()) > 0) {
-              opened = true;
-              break;
+        const gate = confirmGate(
+          confirm,
+          `Post video \`${video_path}\` to the Shopee Video feed with caption:\n\n> ${caption}`,
+        );
+        if (gate) return gate;
+        const text = await withBuyerAction(
+          'post-shopee-video',
+          async (page) => {
+            // 1. Find a live upload path.
+            let opened = false;
+            for (const p of VIDEO_PATH_CANDIDATES) {
+              await page
+                .goto(`${BASE_URL}${p}`, { waitUntil: 'domcontentloaded', timeout: 45000 })
+                .catch(() => {});
+              await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+              if ((await page.locator(SEL.videoInput).count()) > 0) {
+                opened = true;
+                break;
+              }
             }
-          }
-          if (!opened) {
-            return (
-              '⛔ Shopee Video posting is not available on the web right now (app-first feature). ' +
-              'Run shopee_video_probe for details; re-run later in case Shopee ships a web uploader.'
-            );
-          }
+            if (!opened) {
+              return (
+                '⛔ Shopee Video posting is not available on the web right now (app-first feature). ' +
+                'Run shopee_video_probe for details; re-run later in case Shopee ships a web uploader.'
+              );
+            }
 
-          // 2. Attach the video.
-          const input = page.locator(SEL.videoInput).first();
-          await input.setInputFiles(video_path);
-          await page
-            .locator(SEL.videoInput)
-            .first()
-            .waitFor({ state: 'attached', timeout: 120000 })
-            .catch(() => {});
-          await stepDelay();
-
-          // 3. Caption.
-          const cap = page.locator(SEL.caption).first();
-          if (await cap.isVisible().catch(() => false)) {
-            await cap.click().catch(() => {});
-            await page.keyboard.type(caption, { delay: 20 });
+            // 2. Attach the video.
+            const input = page.locator(SEL.videoInput).first();
+            await input.setInputFiles(video_path);
+            await page
+              .locator(SEL.videoInput)
+              .first()
+              .waitFor({ state: 'attached', timeout: 120000 })
+              .catch(() => {});
             await stepDelay();
-          }
 
-          // 4. Post.
-          const post = page.locator(SEL.postButton).first();
-          if (!(await post.isVisible().catch(() => false))) {
-            return '⚠️ Video attached but no post button found — check the debug screenshot and update SEL.postButton.';
-          }
-          await post.click();
-          const ok = await page
-            .locator(SEL.successToast)
-            .first()
-            .waitFor({ state: 'visible', timeout: 30000 })
-            .then(() => true)
-            .catch(() => false);
-          return ok
-            ? `✅ Video posted to Shopee Video:\n${caption}`
-            : '⚠️ Post clicked but no success toast appeared — verify manually on the Shopee Video page.';
-        });
+            // 3. Caption.
+            const cap = page.locator(SEL.caption).first();
+            if (await cap.isVisible().catch(() => false)) {
+              await cap.click().catch(() => {});
+              await page.keyboard.type(caption, { delay: 20 });
+              await stepDelay();
+            }
+
+            // 4. Post.
+            const post = page.locator(SEL.postButton).first();
+            if (!(await post.isVisible().catch(() => false))) {
+              return '⚠️ Video attached but no post button found — check the debug screenshot and update SEL.postButton.';
+            }
+            await post.click();
+            const ok = await page
+              .locator(SEL.successToast)
+              .first()
+              .waitFor({ state: 'visible', timeout: 30000 })
+              .then(() => true)
+              .catch(() => false);
+            return ok
+              ? `✅ Video posted to Shopee Video:\n${caption}`
+              : '⚠️ Post clicked but no success toast appeared — verify manually on the Shopee Video page.';
+          },
+          `post: ${caption.slice(0, 80)}`,
+        );
         return { content: [{ type: 'text', text }] };
       });
     },

@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { launchPersistentContext } from 'cloakbrowser';
 import type { BrowserContext, Page, Response } from 'playwright';
+import { createSafetyGate } from '../utils/rate-limit.js';
 
 // ─── Configuration ────────────────────────────────────────────────────────────
 
@@ -113,12 +114,35 @@ function withLock<T>(fn: () => Promise<T>): Promise<T> {
   return run;
 }
 
+// Account-safety gate: spacing, budgets, and the anti-bot circuit breaker for
+// EVERY browser operation (see src/utils/rate-limit.ts). One account + one IP
+// means behaviour is the ban trigger — so all traffic funnels through here.
+const safety = createSafetyGate();
+
 /**
- * Serialize a callback against all other browser traffic. Used by the UI-action
- * layer (src/actions) so writes and captures can never interleave.
+ * Serialize a callback against all other browser traffic, gated by the
+ * account-safety rate limiter. `kind` selects the limits: captures and
+ * direct API calls are 'read'; UI write actions are 'write'.
  */
-export function withBrowserLock<T>(fn: () => Promise<T>): Promise<T> {
-  return withLock(fn);
+export async function withBrowserLock<T>(
+  fn: () => Promise<T>,
+  kind: 'read' | 'write' = 'read',
+): Promise<T> {
+  await safety.acquire(kind);
+  const run = withLock(fn);
+  try {
+    const result = await run;
+    safety.reportSuccess();
+    return result;
+  } catch (err) {
+    safety.reportFailure(err);
+    throw err;
+  }
+}
+
+/** Live safety status (for the safety_status tool and diagnostics). */
+export function safetyStatus() {
+  return safety.status();
 }
 
 export interface CaptureOptions {
@@ -168,7 +192,7 @@ export async function captureJson<T>(
 ): Promise<CaptureResult<T>> {
   const timeoutMs = opts.timeoutMs ?? 30000;
   const matchLabel = Array.isArray(opts.apiMatch) ? opts.apiMatch.join('|') : opts.apiMatch;
-  return withLock(async () => {
+  return withBrowserLock(async () => {
     const page = await getPageFor(opts.realm ?? 'buyer');
 
     return new Promise<CaptureResult<T>>((resolve, reject) => {
@@ -223,7 +247,7 @@ export async function captureJson<T>(
 
 /** Warm the session once (loads Shopee so the anti-fraud SDK initialises). */
 export async function warm(): Promise<void> {
-  await withLock(async () => {
+  await withBrowserLock(async () => {
     const page = await getPageFor('buyer');
     if (!page.url().includes(DOMAIN)) {
       debug('Warming session on Shopee homepage…');
@@ -247,7 +271,7 @@ export async function isLoggedIn(): Promise<boolean> {
  * means the realm needs a manual login (npm run login:seller).
  */
 export async function isSellerLoggedIn(): Promise<boolean> {
-  return withLock(async () => {
+  return withBrowserLock(async () => {
     const page = await getPageFor('seller');
     await page.goto(`${SELLER_BASE_URL}/portal/`, {
       waitUntil: 'domcontentloaded',

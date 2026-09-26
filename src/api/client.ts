@@ -1,5 +1,6 @@
 import { captureJson, BASE_URL } from '../browser/session.js';
 import type { CaptureOptions, CaptureResult } from '../browser/session.js';
+import { sleep } from '../actions/base.js';
 
 type CaptureFn = <T>(pageUrl: string, opts: CaptureOptions) => Promise<CaptureResult<T>>;
 
@@ -56,9 +57,13 @@ export async function shopeeCapture<T extends { error?: number; error_msg?: stri
     const msg = e instanceof Error ? e.message : String(e);
     if (/timeout/i.test(msg)) {
       // A timeout usually means the anti-bot gate silently dropped the request, but a
-      // slow page load or transient network blip looks identical. Retry once before
-      // reporting "not logged in" so we don't misdiagnose a one-off hiccup.
-      if (!isRetry) return shopeeCapture<T>(pageUrl, apiMatch, timeoutMs, true, capture);
+      // slow page load or transient network blip looks identical. Retry once — after a
+      // jittered 3–8 s pause, never instantly (an immediate identical retry is exactly
+      // what a bot does) — before reporting "not logged in".
+      if (!isRetry) {
+        await sleep(3000 + Math.random() * 5000);
+        return shopeeCapture<T>(pageUrl, apiMatch, timeoutMs, true, capture);
+      }
       throw new ShopeeAuthRequiredError(Array.isArray(apiMatch) ? apiMatch.join('|') : apiMatch);
     }
     throw new ShopeeAPIError(

@@ -52,6 +52,22 @@ Beyond the read-only discovery tools above, this build adds a **Seller Centre re
 
 Write tools (`upload_product_video`, `update_price`, `update_stock`, `list_item`, `unlist_item`, `send_chat_reply`, `post_shopee_video`) are **not** read-only: they act on your own shop, one action per call, with a politeness delay between UI steps. Every failing action saves a screenshot to `~/.shopee-mcp/debug/` so a UI drift is diagnosable; portal selectors are centralised in `src/seller/pages/*` and `src/actions/*` for one-line fixes.
 
+## Safety & anti-ban (account-safety gate)
+
+Every browser operation — read or write — passes through one account-safety gate (`src/utils/rate-limit.ts`), because all traffic comes from **one account + one IP**, and behaviour is what gets accounts flagged. The gate provides:
+
+1. **Jittered spacing** — reads wait 3–6 s between operations, writes 1–3 min. Never a fixed rhythm.
+2. **Budgets** — max 30 reads/hour, 10 writes/hour, 30 writes/day (persisted in `~/.shopee-mcp/usage.json`, surviving restarts). Exceeding a budget fails fast with the reset time instead of hammering.
+3. **Anti-bot circuit breaker** — an anti-bot block (`90309999`), an auth-required error, or two consecutive timeouts cools the whole server down for 10 minutes. Tools fail fast during cooldown with the unlock time; don't force retries.
+4. **Two-step confirmation** — every write tool returns a **preview** unless called with `confirm: true`, so an AI client can never modify your account uninvited.
+5. **Seller-write switch** — all seller-side writes stay disabled until `SHOPEE_ENABLE_SELLER_WRITES=true` in `.env`.
+6. **Audit trail** — every write (success or failure) and every block is appended to `~/.shopee-mcp/audit.log` (JSONL).
+7. **Introspection** — the `safety_status` tool shows budgets used, next allowed slots, and cooldown state.
+
+Tune everything via env: `SHOPEE_READ_SPACING_MS`, `SHOPEE_READ_SPREAD_MS`, `SHOPEE_WRITE_SPACING_MS`, `SHOPEE_WRITE_SPREAD_MS`, `SHOPEE_READ_MAX_PER_HOUR`, `SHOPEE_WRITE_MAX_PER_HOUR`, `SHOPEE_WRITE_MAX_PER_DAY`, `SHOPEE_COOLDOWN_MS`.
+
+**Honest limits:** these measures reduce the risk of behavioural detection; they cannot eliminate it. Automation of any kind remains against Shopee's ToS — run this only on your own account, at low volume, and never for bulk scraping. Rotating proxies are out of scope by design.
+
 ## Why a browser?
 
 Shopee does **not** expose an open API or server-rendered product HTML. Its `/api/v4/*` endpoints are guarded by an anti-fraud gate (`error 90309999`) that requires per-request signature headers (`af-ac-enc-dat`, `x-sap-sec`, …) minted by Shopee's own obfuscated SDK. Plain `fetch`, headless Chromium, and even a hand-rolled fetch from inside the page all get rejected.

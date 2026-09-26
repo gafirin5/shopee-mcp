@@ -14,6 +14,7 @@ import { findVideoInfo } from '../src/utils/media.js';
 import { summarizeJson } from '../src/utils/json.js';
 import { parseProductRef } from '../src/tools/research.js';
 import { parseShopRef } from '../src/tools/shop.js';
+import { createSafetyGate, RateLimitError, CooldownError } from '../src/utils/rate-limit.js';
 import type { SearchItem, ItemBasic } from '../src/api/types.js';
 
 let failures = 0;
@@ -409,6 +410,103 @@ test('parseShopRef: extracts the shopid from a product slug URL', () => {
 
 test('parseShopRef: rejects garbage', () => {
   assert.equal(parseShopRef('not-a-shop'), null);
+});
+
+// ─── account-safety gate (rate-limit.ts) ────────────────────────────────────
+
+interface FakeGate {
+  gate: ReturnType<typeof createSafetyGate>;
+  sleeps: number[];
+  advance: (ms: number) => void;
+}
+
+function makeGate(cfg: Record<string, number> = {}): FakeGate {
+  let t = 1_000_000;
+  const sleeps: number[] = [];
+  const gate = createSafetyGate({
+    now: () => t,
+    sleep: async (ms: number) => {
+      sleeps.push(ms);
+      t += ms;
+    },
+    persistPath: null,
+    config: {
+      readMaxPerHour: 2,
+      writeMaxPerHour: 1,
+      writeMaxPerDay: 2,
+      cooldownMs: 600_000,
+      ...cfg,
+    },
+  });
+  return { gate, sleeps, advance: (ms: number) => (t += ms) };
+}
+
+test('safety: first read needs no wait, second read waits a jittered 3–6s', async () => {
+  const { gate, sleeps } = makeGate();
+  await gate.acquire('read');
+  assert.deepEqual(sleeps, []);
+  await gate.acquire('read');
+  assert.equal(sleeps.length, 1);
+  assert.ok(sleeps[0] >= 3000 && sleeps[0] <= 6000, `spacing ${sleeps[0]} out of range`);
+});
+
+test('safety: write waits a jittered 60–180s', async () => {
+  const { gate, sleeps } = makeGate({ writeMaxPerHour: 2 });
+  await gate.acquire('write');
+  await gate.acquire('write');
+  assert.ok(sleeps[0] >= 60_000 && sleeps[0] <= 180_000, `spacing ${sleeps[0]} out of range`);
+});
+
+test('safety: hourly read budget exhausted → RateLimitError', async () => {
+  const { gate, advance } = makeGate();
+  await gate.acquire('read');
+  advance(10_000);
+  await gate.acquire('read');
+  advance(10_000);
+  await assert.rejects(() => gate.acquire('read'), RateLimitError);
+});
+
+test('safety: write budget (hourly + daily) enforced', async () => {
+  const { gate, advance } = makeGate();
+  await gate.acquire('write');
+  advance(200_000);
+  // second write this hour exceeds writeMaxPerHour=1
+  await assert.rejects(() => gate.acquire('write'), RateLimitError);
+  advance(60 * 60_000);
+  // new hour, but daily budget (2) is spent by this one
+  await gate.acquire('write');
+  advance(60 * 60_000);
+  await assert.rejects(() => gate.acquire('write'), RateLimitError);
+});
+
+test('safety: two consecutive timeouts trip the breaker', async () => {
+  const { gate } = makeGate();
+  gate.reportFailure(new Error('Timeout 30000ms exceeded'));
+  await gate.acquire('read'); // one timeout alone is not enough
+  gate.reportFailure(new Error('Timeout 45000ms exceeded'));
+  await assert.rejects(() => gate.acquire('read'), CooldownError);
+});
+
+test('safety: an anti-bot block trips the breaker immediately', async () => {
+  const { gate } = makeGate();
+  gate.reportFailure(new Error('Shopee blocked this request with its anti-bot gate.'));
+  await assert.rejects(() => gate.acquire('read'), CooldownError);
+});
+
+test('safety: cooldown releases after the cooldown window (half-open)', async () => {
+  const { gate, advance } = makeGate();
+  gate.reportFailure(new Error('anti-bot 90309999'));
+  await assert.rejects(() => gate.acquire('read'), CooldownError);
+  advance(601_000);
+  await gate.acquire('read'); // allowed again
+});
+
+test('safety: reportSuccess resets the timeout streak', async () => {
+  const { gate } = makeGate();
+  gate.reportFailure(new Error('Timeout 30000ms exceeded'));
+  gate.reportSuccess();
+  gate.reportFailure(new Error('Timeout 30000ms exceeded'));
+  await gate.acquire('read'); // must NOT be blocked
 });
 
 await runTests();

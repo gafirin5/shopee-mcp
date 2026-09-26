@@ -1,9 +1,10 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { sellerCaptureRaw } from '../../seller/capture.js';
-import { withSellerAction } from '../../actions/base.js';
+import { withSellerAction, assertSellerWritesEnabled } from '../../actions/base.js';
 import { openChat, openConversation, sendReply, CHAT_SEL } from '../../seller/pages/chat.js';
 import { withErrorHandling } from '../../utils/errors.js';
+import { confirmGate } from '../../utils/confirm.js';
 import { summarizeJson } from '../../utils/json.js';
 
 const CONV_CANDIDATES = ['/conversation', '/chat/list', '/chat/get', '/message/list'];
@@ -83,28 +84,39 @@ export function registerSellerChatTools(server: McpServer): void {
   server.tool(
     'send_chat_reply',
     'Send a chat reply to a buyer through the seller chat composer (typed keystrokes, ' +
-      'one message per call, on your own shop).',
+      'one message per call, on your own shop). Requires confirm=true (preview otherwise).',
     {
       match: z
         .string()
         .optional()
         .describe('Buyer name / chat id to open (default: newest conversation)'),
       message: z.string().min(1).max(2000).describe('The reply text to send'),
+      confirm: z.boolean().default(false).describe('Must be true to actually send'),
     },
-    async ({ match, message }) => {
+    async ({ match, message, confirm }) => {
       return withErrorHandling(async () => {
-        const text = await withSellerAction('send-chat-reply', async (page) => {
-          await openChat(page);
-          await openConversation(page, match);
-          const bubbles = page.locator(CHAT_SEL.messageBubble);
-          const before = await bubbles.count();
-          await sendReply(page, message);
-          const after = await bubbles.count();
-          return after > before
-            ? `✅ Reply sent${match ? ` to "${match}"` : ''}:\n${message}`
-            : `⚠️ Message typed and Enter pressed, but no new bubble was detected — verify in ` +
-                `the chat window. If the composer selector drifted, update CHAT_SEL.`;
-        });
+        assertSellerWritesEnabled('send_chat_reply');
+        const gate = confirmGate(
+          confirm,
+          `Send chat reply${match ? ` to "${match}"` : ' to the newest conversation'}:\n\n> ${message}`,
+        );
+        if (gate) return gate;
+        const text = await withSellerAction(
+          'send-chat-reply',
+          async (page) => {
+            await openChat(page);
+            await openConversation(page, match);
+            const bubbles = page.locator(CHAT_SEL.messageBubble);
+            const before = await bubbles.count();
+            await sendReply(page, message);
+            const after = await bubbles.count();
+            return after > before
+              ? `✅ Reply sent${match ? ` to "${match}"` : ''}:\n${message}`
+              : `⚠️ Message typed and Enter pressed, but no new bubble was detected — verify in ` +
+                  `the chat window. If the composer selector drifted, update CHAT_SEL.`;
+          },
+          `reply ${match ?? '(newest)'}: ${message.slice(0, 80)}`,
+        );
         return { content: [{ type: 'text', text }] };
       });
     },

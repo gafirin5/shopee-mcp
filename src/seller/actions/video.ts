@@ -57,48 +57,52 @@ export async function uploadProductVideo(args: UploadVideoArgs): Promise<string>
   await validateVideoFile(videoPath);
   const absPath = path.resolve(videoPath);
 
-  return withSellerAction('upload-product-video', async (page: Page) => {
-    const steps: string[] = [];
+  return withSellerAction(
+    'upload-product-video',
+    async (page: Page) => {
+      const steps: string[] = [];
 
-    // 1. Open the edit page.
-    await openProductEdit(page, itemId);
-    steps.push(`✅ Opened edit page for product ${itemId}`);
+      // 1. Open the edit page.
+      await openProductEdit(page, itemId);
+      steps.push(`✅ Opened edit page for product ${itemId}`);
 
-    // 2. Locate the video file input (portal reveals it inside the Media section).
-    const input = await findVideoInput(page);
-    await stepDelay();
+      // 2. Locate the video file input (portal reveals it inside the Media section).
+      const input = await findVideoInput(page);
+      await stepDelay();
 
-    // 3. Attach the file — Playwright feeds the input directly, no OS dialog.
-    await input.setInputFiles(absPath);
-    steps.push(`✅ Attached ${path.basename(absPath)}`);
+      // 3. Attach the file — Playwright feeds the input directly, no OS dialog.
+      await input.setInputFiles(absPath);
+      steps.push(`✅ Attached ${path.basename(absPath)}`);
 
-    // 4. Wait for upload + transcoding to render a preview.
-    const ready = await waitForVideoReady(page, processTimeoutMs);
-    if (!ready) {
-      throw new ActionError(
-        `Video did not finish processing within ${Math.round(processTimeoutMs / 1000)}s. ` +
-          'It may still be transcoding on Shopee — re-run check_product_video before retrying.',
-      );
-    }
-    steps.push('✅ Video preview rendered (upload + processing done)');
-    await stepDelay();
-
-    // 5. Save.
-    if (!args.skipSave) {
-      const saved = await saveProduct(page);
-      if (!saved) {
+      // 4. Wait for upload + transcoding to render a preview.
+      const ready = await waitForVideoReady(page, processTimeoutMs);
+      if (!ready) {
         throw new ActionError(
-          'Save was clicked but no success toast appeared. Verify manually on the edit page ' +
-            'before assuming the video is attached.',
+          `Video did not finish processing within ${Math.round(processTimeoutMs / 1000)}s. ` +
+            'It may still be transcoding on Shopee — re-run check_product_video before retrying.',
         );
       }
-      steps.push('✅ Saved — success toast shown');
-    } else {
-      steps.push('⏭️ skipSave=true — product not saved');
-    }
+      steps.push('✅ Video preview rendered (upload + processing done)');
+      await stepDelay();
 
-    return `🎬 Upload video produk ${itemId}\n\n${steps.join('\n')}`;
-  });
+      // 5. Save.
+      if (!args.skipSave) {
+        const saved = await saveProduct(page);
+        if (!saved) {
+          throw new ActionError(
+            'Save was clicked but no success toast appeared. Verify manually on the edit page ' +
+              'before assuming the video is attached.',
+          );
+        }
+        steps.push('✅ Saved — success toast shown');
+      } else {
+        steps.push('⏭️ skipSave=true — product not saved');
+      }
+
+      return `🎬 Upload video produk ${itemId}\n\n${steps.join('\n')}`;
+    },
+    `item ${itemId} video ← ${absPath}`,
+  );
 }
 
 export interface RemoveVideoArgs {
@@ -113,30 +117,34 @@ export interface RemoveVideoArgs {
  */
 export async function removeProductVideo(args: RemoveVideoArgs): Promise<string> {
   const { itemId } = args;
-  return withSellerAction('remove-product-video', async (page: Page) => {
-    await openProductEdit(page, itemId);
-    const preview = page
-      .locator(
-        '[class*="video" i] [class*="delete" i], [class*="video" i] [class*="remove" i], [class*="video" i] [class*="close" i]',
-      )
-      .first();
-    const count = await preview.count();
-    if (!count) {
-      throw new ActionError(
-        'No video delete control found — either the product has no video or the selector drifted. ' +
-          'Check the debug screenshot and update productEdit selectors.',
-      );
-    }
-    await preview.hover().catch(() => {});
-    await stepDelay();
-    await preview.click();
-    await stepDelay();
+  return withSellerAction(
+    'remove-product-video',
+    async (page: Page) => {
+      await openProductEdit(page, itemId);
+      const preview = page
+        .locator(
+          '[class*="video" i] [class*="delete" i], [class*="video" i] [class*="remove" i], [class*="video" i] [class*="close" i]',
+        )
+        .first();
+      const count = await preview.count();
+      if (!count) {
+        throw new ActionError(
+          'No video delete control found — either the product has no video or the selector drifted. ' +
+            'Check the debug screenshot and update productEdit selectors.',
+        );
+      }
+      await preview.hover().catch(() => {});
+      await stepDelay();
+      await preview.click();
+      await stepDelay();
 
-    const saved = await saveProduct(page);
-    return saved
-      ? `🗑️ Video deleted and product ${itemId} saved.`
-      : `🗑️ Video delete clicked on product ${itemId}, but no save toast appeared — verify manually.`;
-  });
+      const saved = await saveProduct(page);
+      return saved
+        ? `🗑️ Video deleted and product ${itemId} saved.`
+        : `🗑️ Video delete clicked on product ${itemId}, but no save toast appeared — verify manually.`;
+    },
+    `item ${itemId} remove video`,
+  );
 }
 
 export const UPLOAD_DEFAULT_TIMEOUT = ACTION_TIMEOUT_MS;

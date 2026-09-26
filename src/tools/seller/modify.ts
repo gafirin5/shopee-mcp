@@ -5,7 +5,9 @@ import {
   updateProductStock,
   setItemListing,
 } from '../../seller/actions/product.js';
+import { assertSellerWritesEnabled } from '../../actions/base.js';
 import { withErrorHandling } from '../../utils/errors.js';
+import { confirmGate } from '../../utils/confirm.js';
 
 const numericArgs = {
   item_id: z.string().min(1).describe('The product/item id'),
@@ -15,16 +17,26 @@ const numericArgs = {
     .min(0)
     .optional()
     .describe('0-based model index for variation products; omit for simple products'),
+  confirm: z
+    .boolean()
+    .default(false)
+    .describe('Must be true to execute the write; false returns a preview only'),
 };
 
 export function registerSellerModifyTools(server: McpServer): void {
   server.tool(
     'update_price',
     'Set a product price via the Seller Centre edit page (IDR, no separators), then save. ' +
-      'One write per call on your own shop.',
+      'Requires confirm=true; without it returns a preview. Rate-limited like every write.',
     { ...numericArgs, price: z.number().int().min(1).describe('New price in IDR, e.g. 150000') },
-    async ({ item_id, variation_index, price }) => {
+    async ({ item_id, variation_index, price, confirm }) => {
       return withErrorHandling(async () => {
+        assertSellerWritesEnabled('update_price');
+        const gate = confirmGate(
+          confirm,
+          `Set price of product \`${item_id}\`${variation_index !== undefined ? ` (variation ${variation_index})` : ''} → **${price.toLocaleString('id-ID')} IDR**, then save.`,
+        );
+        if (gate) return gate;
         const text = await updateProductPrice({
           itemId: item_id,
           value: price,
@@ -38,10 +50,16 @@ export function registerSellerModifyTools(server: McpServer): void {
   server.tool(
     'update_stock',
     'Set a product stock level via the Seller Centre edit page, then save. ' +
-      'One write per call on your own shop.',
+      'Requires confirm=true; without it returns a preview. Rate-limited like every write.',
     { ...numericArgs, stock: z.number().int().min(0).describe('New stock quantity') },
-    async ({ item_id, variation_index, stock }) => {
+    async ({ item_id, variation_index, stock, confirm }) => {
       return withErrorHandling(async () => {
+        assertSellerWritesEnabled('update_stock');
+        const gate = confirmGate(
+          confirm,
+          `Set stock of product \`${item_id}\`${variation_index !== undefined ? ` (variation ${variation_index})` : ''} → **${stock}**, then save.`,
+        );
+        if (gate) return gate;
         const text = await updateProductStock({
           itemId: item_id,
           value: stock,
@@ -54,10 +72,17 @@ export function registerSellerModifyTools(server: McpServer): void {
 
   server.tool(
     'unlist_item',
-    'Take a product off sale (unlist) via the Seller Centre product list switch.',
-    { item_id: z.string().min(1).describe('The product/item id') },
-    async ({ item_id }) => {
+    'Take a product off sale (unlist) via the Seller Centre product list switch. ' +
+      'Requires confirm=true; without it returns a preview.',
+    {
+      item_id: z.string().min(1).describe('The product/item id'),
+      confirm: z.boolean().default(false).describe('Must be true to execute'),
+    },
+    async ({ item_id, confirm }) => {
       return withErrorHandling(async () => {
+        assertSellerWritesEnabled('unlist_item');
+        const gate = confirmGate(confirm, `Take product \`${item_id}\` **off sale** (unlist).`);
+        if (gate) return gate;
         const text = await setItemListing(item_id, false);
         return { content: [{ type: 'text', text }] };
       });
@@ -66,10 +91,17 @@ export function registerSellerModifyTools(server: McpServer): void {
 
   server.tool(
     'list_item',
-    'Put a product back on sale (list) via the Seller Centre product list switch.',
-    { item_id: z.string().min(1).describe('The product/item id') },
-    async ({ item_id }) => {
+    'Put a product back on sale (list) via the Seller Centre product list switch. ' +
+      'Requires confirm=true; without it returns a preview.',
+    {
+      item_id: z.string().min(1).describe('The product/item id'),
+      confirm: z.boolean().default(false).describe('Must be true to execute'),
+    },
+    async ({ item_id, confirm }) => {
       return withErrorHandling(async () => {
+        assertSellerWritesEnabled('list_item');
+        const gate = confirmGate(confirm, `Put product \`${item_id}\` back **on sale** (list).`);
+        if (gate) return gate;
         const text = await setItemListing(item_id, true);
         return { content: [{ type: 'text', text }] };
       });

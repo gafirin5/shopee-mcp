@@ -2,7 +2,9 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { shopeeCapture, shopeeUrl } from '../../api/client.js';
 import { uploadProductVideo, removeProductVideo } from '../../seller/actions/video.js';
+import { assertSellerWritesEnabled } from '../../actions/base.js';
 import { withErrorHandling } from '../../utils/errors.js';
+import { confirmGate } from '../../utils/confirm.js';
 import { findVideoInfo } from '../../utils/media.js';
 import { parseProductUrl } from '../product.js';
 
@@ -10,8 +12,8 @@ export function registerSellerVideoTools(server: McpServer): void {
   server.tool(
     'upload_product_video',
     'Upload a video file to a product listing via the Shopee Seller Centre edit page, ' +
-      'then save. One action per call, on your own shop. MP4/MOV; large files may take ' +
-      'a while to transcode — the tool waits for the preview before saving.',
+      'then save. Requires confirm=true (a preview is returned otherwise). MP4/MOV; the ' +
+      'tool waits for transcoding before saving. Rate-limited like every write.',
     {
       item_id: z.string().min(1).describe('The product/item id (same id as the marketplace URL)'),
       video_path: z
@@ -29,9 +31,16 @@ export function registerSellerVideoTools(server: McpServer): void {
         .boolean()
         .default(false)
         .describe('Upload the video but do not click Save (dry preview)'),
+      confirm: z.boolean().default(false).describe('Must be true to execute the upload'),
     },
-    async ({ item_id, video_path, process_timeout_ms, skip_save }) => {
+    async ({ item_id, video_path, process_timeout_ms, skip_save, confirm }) => {
       return withErrorHandling(async () => {
+        assertSellerWritesEnabled('upload_product_video');
+        const gate = confirmGate(
+          confirm,
+          `Upload video \`${video_path}\` to product \`${item_id}\`${skip_save ? ' (skip_save: NOT saved)' : ' and save the product'}.`,
+        );
+        if (gate) return gate;
         const text = await uploadProductVideo({
           itemId: item_id,
           videoPath: video_path,
@@ -45,12 +54,17 @@ export function registerSellerVideoTools(server: McpServer): void {
 
   server.tool(
     'remove_product_video',
-    'Remove the video attached to a product listing via the Seller Centre edit page, then save.',
+    'Remove the video attached to a product listing via the Seller Centre edit page, then save. ' +
+      'Requires confirm=true (a preview is returned otherwise).',
     {
       item_id: z.string().min(1).describe('The product/item id'),
+      confirm: z.boolean().default(false).describe('Must be true to execute'),
     },
-    async ({ item_id }) => {
+    async ({ item_id, confirm }) => {
       return withErrorHandling(async () => {
+        assertSellerWritesEnabled('remove_product_video');
+        const gate = confirmGate(confirm, `Delete the video of product \`${item_id}\` and save.`);
+        if (gate) return gate;
         const text = await removeProductVideo({ itemId: item_id });
         return { content: [{ type: 'text', text }] };
       });

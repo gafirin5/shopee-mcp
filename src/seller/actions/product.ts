@@ -33,48 +33,56 @@ async function fillNumericField(
 export async function updateProductPrice(args: NumericUpdateArgs): Promise<string> {
   const { itemId, value, variationIndex } = args;
   if (value <= 0) throw new Error('Price must be a positive number (in IDR, no separators).');
-  return withSellerAction('update-price', async (page: Page) => {
-    await openProductEdit(page, itemId);
-    await stepDelay();
-    const inputs = await getPriceInputs(page);
-    const idx = variationIndex ?? 0;
-    if (idx >= inputs.length) {
-      throw new Error(
-        `variation_index ${idx} is out of range — the edit page exposes ${inputs.length} price input(s). ` +
-          'For variation products, pass the 0-based model index.',
-      );
-    }
-    await fillNumericField(page, inputs[idx], value);
-    const saved = await saveProduct(page);
-    if (!saved) {
-      throw new Error('Save clicked but no success toast appeared — verify on the edit page.');
-    }
-    return `💰 Price for product ${itemId}${variationIndex !== undefined ? ` (variation ${variationIndex})` : ''} set to ${value.toLocaleString('id-ID')} and saved.`;
-  });
+  return withSellerAction(
+    'update-price',
+    async (page: Page) => {
+      await openProductEdit(page, itemId);
+      await stepDelay();
+      const inputs = await getPriceInputs(page);
+      const idx = variationIndex ?? 0;
+      if (idx >= inputs.length) {
+        throw new Error(
+          `variation_index ${idx} is out of range — the edit page exposes ${inputs.length} price input(s). ` +
+            'For variation products, pass the 0-based model index.',
+        );
+      }
+      await fillNumericField(page, inputs[idx], value);
+      const saved = await saveProduct(page);
+      if (!saved) {
+        throw new Error('Save clicked but no success toast appeared — verify on the edit page.');
+      }
+      return `💰 Price for product ${itemId}${variationIndex !== undefined ? ` (variation ${variationIndex})` : ''} set to ${value.toLocaleString('id-ID')} and saved.`;
+    },
+    `item ${itemId} price → ${value}`,
+  );
 }
 
 /** Update a product's stock via the Seller Centre edit page. */
 export async function updateProductStock(args: NumericUpdateArgs): Promise<string> {
   const { itemId, value, variationIndex } = args;
   if (value < 0) throw new Error('Stock cannot be negative.');
-  return withSellerAction('update-stock', async (page: Page) => {
-    await openProductEdit(page, itemId);
-    await stepDelay();
-    const inputs = await getStockInputs(page);
-    const idx = variationIndex ?? 0;
-    if (idx >= inputs.length) {
-      throw new Error(
-        `variation_index ${idx} is out of range — the edit page exposes ${inputs.length} stock input(s). ` +
-          'For variation products, pass the 0-based model index.',
-      );
-    }
-    await fillNumericField(page, inputs[idx], value);
-    const saved = await saveProduct(page);
-    if (!saved) {
-      throw new Error('Save clicked but no success toast appeared — verify on the edit page.');
-    }
-    return `📦 Stock for product ${itemId}${variationIndex !== undefined ? ` (variation ${variationIndex})` : ''} set to ${value} and saved.`;
-  });
+  return withSellerAction(
+    'update-stock',
+    async (page: Page) => {
+      await openProductEdit(page, itemId);
+      await stepDelay();
+      const inputs = await getStockInputs(page);
+      const idx = variationIndex ?? 0;
+      if (idx >= inputs.length) {
+        throw new Error(
+          `variation_index ${idx} is out of range — the edit page exposes ${inputs.length} stock input(s). ` +
+            'For variation products, pass the 0-based model index.',
+        );
+      }
+      await fillNumericField(page, inputs[idx], value);
+      const saved = await saveProduct(page);
+      if (!saved) {
+        throw new Error('Save clicked but no success toast appeared — verify on the edit page.');
+      }
+      return `📦 Stock for product ${itemId}${variationIndex !== undefined ? ` (variation ${variationIndex})` : ''} set to ${value} and saved.`;
+    },
+    `item ${itemId} stock → ${value}`,
+  );
 }
 
 export interface ListingArgs {
