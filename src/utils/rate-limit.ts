@@ -126,7 +126,7 @@ export function createSafetyGate(options: SafetyGateOptions = {}) {
 
   // ── state ──
   let state: PersistedState = { date: today(now()), writesToday: 0, ops: [] };
-  let lastOpAt: Record<OpKind, number> = { read: 0, write: 0 };
+  const lastOpAt: Record<OpKind, number> = { read: 0, write: 0 };
   let blockedUntil = 0;
   let consecutiveTimeouts = 0;
 

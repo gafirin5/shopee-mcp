@@ -1,8 +1,9 @@
-import { captureJson, BASE_URL } from '../browser/session.js';
+import { captureJson, isLoggedIn, BASE_URL } from '../browser/session.js';
 import type { CaptureOptions, CaptureResult } from '../browser/session.js';
 import { sleep } from '../actions/base.js';
 
 type CaptureFn = <T>(pageUrl: string, opts: CaptureOptions) => Promise<CaptureResult<T>>;
+type LoginCheckFn = () => Promise<boolean>;
 
 /** Shopee's anti-bot/anti-fraud rejection — almost always means "not logged in / detected". */
 export const SHOPEE_ANTIBOT_ERROR = 90309999;
@@ -38,9 +39,10 @@ export class ShopeeAuthRequiredError extends ShopeeAPIError {
  * `/api/v4/*` — the only way to obtain data past the per-request anti-fraud
  * signature (a hand-rolled fetch lacks the af-ac-enc-dat / x-sap-sec headers).
  *
- * @param pageUrl   the Shopee page to load (its app fires the API call)
- * @param apiMatch  substring (or substrings) identifying the target response
- * @param capture   injectable for tests; defaults to the real browser capture
+ * @param pageUrl     the Shopee page to load (its app fires the API call)
+ * @param apiMatch    substring (or substrings) identifying the target response
+ * @param capture     injectable for tests; defaults to the real browser capture
+ * @param checkLogin  injectable for tests; defaults to the real cookie check
  */
 export async function shopeeCapture<T extends { error?: number; error_msg?: string }>(
   pageUrl: string,
@@ -48,7 +50,16 @@ export async function shopeeCapture<T extends { error?: number; error_msg?: stri
   timeoutMs?: number,
   isRetry = false,
   capture: CaptureFn = captureJson,
+  checkLogin: LoginCheckFn = isLoggedIn,
 ): Promise<T> {
+  // Cheap cookie check before spending the capture budget. Without it a signed-out
+  // user waits for a full timeout (plus the retry below) only to be told to log in
+  // — long enough that MCP clients abandon the request first and show their own
+  // "request timed out" instead of our instructions.
+  if (!isRetry && !(await checkLogin())) {
+    throw new ShopeeAuthRequiredError(Array.isArray(apiMatch) ? apiMatch.join('|') : apiMatch);
+  }
+
   let json: T;
   try {
     const result = await capture<T>(pageUrl, { apiMatch, timeoutMs });
@@ -57,12 +68,16 @@ export async function shopeeCapture<T extends { error?: number; error_msg?: stri
     const msg = e instanceof Error ? e.message : String(e);
     if (/timeout/i.test(msg)) {
       // A timeout usually means the anti-bot gate silently dropped the request, but a
+      // A timeout usually means the anti-bot gate silently dropped the request, but a
       // slow page load or transient network blip looks identical. Retry once — after a
       // jittered 3–8 s pause, never instantly (an immediate identical retry is exactly
-      // what a bot does) — before reporting "not logged in".
+      // what a bot does) — and only while the session is still alive mid-request;
+      // when it lapsed during the call, retrying just burns the capture budget.
       if (!isRetry) {
         await sleep(3000 + Math.random() * 5000);
-        return shopeeCapture<T>(pageUrl, apiMatch, timeoutMs, true, capture);
+        if (await checkLogin()) {
+          return shopeeCapture<T>(pageUrl, apiMatch, timeoutMs, true, capture, checkLogin);
+        }
       }
       throw new ShopeeAuthRequiredError(Array.isArray(apiMatch) ? apiMatch.join('|') : apiMatch);
     }
@@ -92,4 +107,13 @@ export async function shopeeCapture<T extends { error?: number; error_msg?: stri
 /** Build an absolute Shopee URL from a path. */
 export function shopeeUrl(pathAndQuery: string): string {
   return `${BASE_URL}${pathAndQuery.startsWith('/') ? '' : '/'}${pathAndQuery}`;
+}
+
+/**
+ * Fail fast when signed out. shopeeCapture does this itself; tools that drive
+ * the page through captureAll call it first so a signed-out user gets the login
+ * prompt immediately instead of after a full scroll-and-wait budget.
+ */
+export async function requireLogin(checkLogin: LoginCheckFn = isLoggedIn): Promise<void> {
+  if (!(await checkLogin())) throw new ShopeeAuthRequiredError();
 }

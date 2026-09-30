@@ -6,6 +6,35 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Ver
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-29
+
+### Added
+
+- **New tool `get_product_reviews`** — rating summary (star breakdown, reviews with comments/media) and pages of buyer reviews with variant bought and seller replies; filter by star rating, comments, or media.
+- **New tools `get_shop_info` and `get_shop_products`** — a seller's profile (by shop ID or username) and their catalogue with sorting and pagination.
+- **New tool `get_flash_sale`** — the current Flash Sale session, upcoming sessions, and deals with flash vs. original price and claimed stock.
+- **New tool `get_product_variants`** — every variant with model ID and per-variant price, with an opt-in exact stock lookup (thanks [@dennislwy](https://github.com/dennislwy); a similar tool was also built by [@franshjy](https://github.com/franshjy)).
+- `search_products` **filters**: `minPrice`, `maxPrice`, `minRating`, `location`, `officialMallOnly`.
+- `get_product_detail` now includes **specs**, **shipping** (origin, fee range, free-shipping threshold, delivery estimates), a **seller summary**, and a variant count — all from the same page load.
+- **Malaysia, Singapore and Taiwan**: the browser locale, timezone and currency now follow `SHOPEE_DOMAIN`, overridable with `SHOPEE_LOCALE` / `SHOPEE_TIMEZONE` (thanks [@dennislwy](https://github.com/dennislwy); also explored by [@nundorn](https://github.com/nundorn) and [@DystopiaOwO](https://github.com/DystopiaOwO)).
+- **Experimental account mode.** While the saved session is logged in, the server also offers tools for your own account; signed out, it stays read-only with those tools hidden. It checks the login in the background at startup and on `check_login_status`, and notifies clients via `tools/list_changed`. `SHOPEE_ACCOUNT_TOOLS=off` keeps it read-only.
+  - Reads: `get_orders`, `get_order_detail` (tracking, timeline — address and phone omitted), `get_my_vouchers`, `get_coins`, `get_notifications`, `get_cart`, `get_shop_vouchers`.
+  - Actions (modify your account, never checkout or payment): `add_to_cart`, `update_cart_item` (change quantity or remove), `like_product`, `follow_shop`, `claim_shop_voucher`. Each clicks Shopee's own button, checks the current state first, and reports only what Shopee confirmed. The cart tools build on [@DystopiaOwO](https://github.com/DystopiaOwO)'s fork.
+- `get_shop_info` works without a login (Shopee still serves shop profiles anonymously).
+- MCP tool annotations (`readOnlyHint`, `idempotentHint`, …) are now actually sent for every tool.
+
+### Fixed
+
+- `search_products` handles Shopee's newer card-shaped search results (`item_data` / `item_card_displayed_asset`) and resolves "virtual item" cards to their real listing (thanks [@dennislwy](https://github.com/dennislwy); the shape change was also fixed independently by [@nundorn](https://github.com/nundorn) and [@franshjy](https://github.com/franshjy)).
+- A signed-out session now fails in about a second with the login prompt, instead of after a full capture timeout plus retry.
+- Pages that redirect (e.g. a shop's `/<username>` URL) no longer fail with "response body is not available": an unreadable matching response is skipped and the next one is used.
+- Prices are formatted with the right symbol and decimals per currency (IDR, MYR, SGD, TWD).
+
+### Changed
+
+- Bumped `cloakbrowser` (0.5.5 → 0.5.10, #36), `playwright` (1.62.1 → 1.63.0, #43), and development tooling (#28, #29, #38, #39, #41, #42, #44, #45).
+- The default capture timeout is 60s (was 30s), since some regions fire the search request ~28s into the page load.
+
 ## [0.2.0] - 2026-08-12
 
 ### Added
@@ -41,7 +70,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Ver
 - **2 tools:** `search_products` (keyword search with sorting & pagination) and `get_product_detail` (price, discount, brand, condition, rating, review/sold counts, stock, location, description).
 - In-memory read cache and a persistent browser profile under `~/.shopee-mcp/`.
 
-[Unreleased]: https://github.com/bintangtimurlangit/shopee-mcp/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/bintangtimurlangit/shopee-mcp/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/bintangtimurlangit/shopee-mcp/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/bintangtimurlangit/shopee-mcp/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/bintangtimurlangit/shopee-mcp/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/bintangtimurlangit/shopee-mcp/releases/tag/v0.1.0

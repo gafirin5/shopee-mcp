@@ -1,7 +1,7 @@
+import { launchPersistentContext } from 'cloakbrowser';
 import 'dotenv/config';
 import os from 'node:os';
 import path from 'node:path';
-import { launchPersistentContext } from 'cloakbrowser';
 import type { BrowserContext, Page, Response } from 'playwright';
 import { createSafetyGate } from '../utils/rate-limit.js';
 
@@ -17,6 +17,40 @@ export const BASE_URL = `https://${DOMAIN}`;
 // seller realm isolated in its own login.
 export const SELLER_BASE_URL = `https://seller.${DOMAIN}`;
 
+// Shopee tailors its web app to the visitor's region, so the browser's locale and
+// timezone must match the domain we're browsing — a Malaysian store opened with an
+// id-ID/Asia/Jakarta browser is an inconsistency the anti-bot gate can notice.
+// Keyed by domain suffix; `SHOPEE_LOCALE` / `SHOPEE_TIMEZONE` override either one.
+// `currency` is here because Shopee's newer search cards omit any per-item
+// currency field (the old `item_basic.currency`), so the region is the only
+// thing left to infer it from.
+export interface Region {
+  locale: string;
+  timezone: string;
+  currency: string;
+}
+
+const REGION_DEFAULTS: Record<string, Region> = {
+  '.id': { locale: 'id-ID', timezone: 'Asia/Jakarta', currency: 'IDR' },
+  '.my': { locale: 'en-MY', timezone: 'Asia/Kuala_Lumpur', currency: 'MYR' },
+  '.sg': { locale: 'en-SG', timezone: 'Asia/Singapore', currency: 'SGD' },
+  '.tw': { locale: 'zh-TW', timezone: 'Asia/Taipei', currency: 'TWD' },
+};
+
+// Falls back to the Indonesian defaults, matching the default SHOPEE_DOMAIN.
+const FALLBACK_REGION = REGION_DEFAULTS['.id'];
+
+/** Region defaults for a Shopee domain, chosen by its TLD suffix. */
+export function regionFor(domain: string): Region {
+  const suffix = Object.keys(REGION_DEFAULTS).find((s) => domain.endsWith(s));
+  return suffix ? REGION_DEFAULTS[suffix] : FALLBACK_REGION;
+}
+
+const region = regionFor(DOMAIN);
+export const LOCALE = process.env.SHOPEE_LOCALE || region.locale;
+export const TIMEZONE = process.env.SHOPEE_TIMEZONE || region.timezone;
+export const CURRENCY = region.currency;
+
 export const PROFILE_DIR =
   process.env.SHOPEE_PROFILE_DIR || path.join(os.homedir(), '.shopee-mcp', 'chrome-profile');
 
@@ -28,8 +62,13 @@ const HEADLESS = process.env.SHOPEE_HEADLESS === 'true';
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
+// Verbose logging is opt-in: only an explicit "true" enables it, so an unset,
+// empty or malformed DEBUG leaves it off. Resolved once, and exported so every
+// caller shares one definition of "is debugging on" rather than re-reading env.
+export const DEBUG = process.env.DEBUG === 'true';
+
 function debug(msg: string): void {
-  if (process.env.DEBUG === 'true') process.stderr.write(`[shopee-mcp] ${msg}\n`);
+  if (DEBUG) process.stderr.write(`[shopee-mcp] ${msg}\n`);
 }
 
 // ─── Context singleton ────────────────────────────────────────────────────────
@@ -44,13 +83,16 @@ function debug(msg: string): void {
 let contextPromise: Promise<BrowserContext> | null = null;
 
 async function createContext(headless: boolean): Promise<BrowserContext> {
-  debug(`Launching CloakBrowser (headless=${headless}) with profile: ${PROFILE_DIR}`);
+  debug(
+    `Launching CloakBrowser (headless=${headless}, locale=${LOCALE}, tz=${TIMEZONE}) ` +
+      `with profile: ${PROFILE_DIR}`,
+  );
   const ctx = (await launchPersistentContext({
     userDataDir: PROFILE_DIR,
     headless,
     userAgent: USER_AGENT,
-    locale: 'id-ID',
-    timezone: 'Asia/Jakarta',
+    locale: LOCALE,
+    timezone: TIMEZONE,
     viewport: { width: 1366, height: 768 },
     humanize: true,
     args: ['--no-sandbox', '--disable-dev-shm-usage'],
@@ -190,7 +232,10 @@ export async function captureJson<T>(
   pageUrl: string,
   opts: CaptureOptions,
 ): Promise<CaptureResult<T>> {
-  const timeoutMs = opts.timeoutMs ?? 30000;
+  // 60s, not 30s: Shopee's search page only fires its `search_items` request at
+  // ~28-30s, so a 30s budget lost the race often enough to trigger the retry in
+  // shopeeCapture — turning a healthy-but-slow page into a 60s+ round trip.
+  const timeoutMs = opts.timeoutMs ?? 60000;
   const matchLabel = Array.isArray(opts.apiMatch) ? opts.apiMatch.join('|') : opts.apiMatch;
   return withBrowserLock(async () => {
     const page = await getPageFor(opts.realm ?? 'buyer');
@@ -243,6 +288,201 @@ export async function captureJson<T>(
         .catch((err) => finish(() => reject(err)));
     });
   });
+}
+
+export interface SelectionOptions<P> {
+  /** Substring identifying the page's main /api/v4 response. */
+  apiMatch: string;
+  /** Substring identifying the response each selection fires. */
+  selectionApiMatch: string;
+  /** Labels to click, derived from the main response. */
+  labelsFrom: (primary: P) => string[];
+  /** Cap on how many selections to click; the rest are left ungathered. */
+  maxSelections?: number;
+  /**
+   * Wall-clock budget for the whole call. Selections stop once it's spent, so a
+   * slow network or a long option list can't push the tool past the ~60s request
+   * timeout most MCP clients default to. Partial results beat a dead request.
+   */
+  deadlineMs?: number;
+  timeoutMs?: number;
+}
+
+/**
+ * Like captureJson, but afterwards clicks a set of on-page options and captures
+ * the response each one fires — for data Shopee reveals only on interaction
+ * (per-variant stock lives in cart_panel/select_variation_pc, never in get_pc).
+ *
+ * One navigation serves both halves. Clicks go through a plain DOM `click()`
+ * rather than Playwright's: CloakBrowser's humanised pointer path first scrolls
+ * the element into view, which throws on Shopee's virtualised variant list.
+ */
+export async function captureWithSelections<P, S>(
+  pageUrl: string,
+  opts: SelectionOptions<P>,
+): Promise<{ primary: P; selections: Map<string, S> }> {
+  const timeoutMs = opts.timeoutMs ?? 60000;
+  const deadline = Date.now() + (opts.deadlineMs ?? 50000);
+  return withBrowserLock(async () => {
+    const page = await getPage();
+
+    const matched = page.waitForResponse(
+      (r: Response) => r.url().includes('/api/v4/') && r.url().includes(opts.apiMatch),
+      { timeout: timeoutMs },
+    );
+    await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+    const primary = (await (await matched).json()) as P;
+
+    const selections = new Map<string, S>();
+    const labels = opts.labelsFrom(primary).slice(0, opts.maxSelections ?? 12);
+    if (labels.length === 0) return { primary, selections };
+
+    // The payload lands before React paints the options; wait for one to exist.
+    await page
+      .waitForFunction(
+        (ls: string[]) =>
+          ls.some((l) =>
+            Array.from(document.querySelectorAll('button')).some(
+              (b) => (b.textContent || '').trim() === l,
+            ),
+          ),
+        labels,
+        { timeout: 30000 },
+      )
+      .catch(() => debug('Variant options never rendered; skipping selections'));
+
+    for (const label of labels) {
+      // Each selection is a full round trip, so check the budget before starting
+      // another rather than discovering mid-flight that we've overrun.
+      const remaining = deadline - Date.now();
+      if (remaining < 6000) {
+        debug(`Selection budget spent; ${selections.size}/${labels.length} gathered`);
+        break;
+      }
+
+      const fired = page
+        .waitForResponse((r: Response) => r.url().includes(opts.selectionApiMatch), {
+          timeout: Math.min(12000, remaining),
+        })
+        .catch(() => null);
+
+      const clicked = await page.evaluate((l: string) => {
+        const b = Array.from(document.querySelectorAll('button')).find(
+          (x) => (x.textContent || '').trim() === l,
+        );
+        if (!b) return false;
+        b.click();
+        return true;
+      }, label);
+
+      if (!clicked) {
+        debug(`No option button for "${label}"`);
+        continue;
+      }
+      const resp = await fired;
+      if (!resp) {
+        debug(`No ${opts.selectionApiMatch} response for "${label}"`);
+        continue;
+      }
+      try {
+        selections.set(label, (await resp.json()) as S);
+      } catch {
+        debug(`Unparsable ${opts.selectionApiMatch} response for "${label}"`);
+      }
+    }
+
+    return { primary, selections };
+  });
+}
+
+/**
+ * Run a browser operation against the shared logged-in page, holding the same
+ * lock as captureJson so it can't interleave with another tool's navigation.
+ */
+export async function withPage<T>(fn: (page: Page) => Promise<T>): Promise<T> {
+  return withBrowserLock(async () => fn(await getPage()));
+}
+
+/** One JSON response gathered by captureAll. */
+export interface CollectedResponse {
+  url: string;
+  /** The request body, for telling apart calls to one endpoint (e.g. cart/update actions). */
+  postData: string;
+  json: unknown;
+}
+
+export interface CollectOptions {
+  /** A response is collected when its URL contains any of these substrings. */
+  apiMatches: string[];
+  /**
+   * Drives the page after navigation (scrolling, clicking filters, paging) while
+   * responses keep being collected. `collected` fills in live, so the callback
+   * can wait on it with waitForCollected.
+   */
+  interact?: (page: Page, collected: CollectedResponse[]) => Promise<void>;
+  timeoutMs?: number;
+}
+
+/**
+ * Navigate to `pageUrl` and collect every matching API response fired while the
+ * page loads and `interact` runs — for data Shopee only fetches on scroll or
+ * click (reviews, flash-sale batches), which a single captureJson can't reach.
+ *
+ * Matches any `/api/vN/` path, not just v4: reviews still live on /api/v2.
+ */
+export async function captureAll(
+  pageUrl: string,
+  opts: CollectOptions,
+): Promise<CollectedResponse[]> {
+  const timeoutMs = opts.timeoutMs ?? 60000;
+  return withBrowserLock(async () => {
+    const page = await getPage();
+    const collected: CollectedResponse[] = [];
+    const pending: Promise<void>[] = [];
+
+    const onResponse = (r: Response): void => {
+      const url = r.url();
+      if (!/\/api\/v\d+\//.test(url) || !opts.apiMatches.some((m) => url.includes(m))) return;
+      const postData = r.request().postData() ?? '';
+      pending.push(
+        r
+          .json()
+          .then((json: unknown) => {
+            collected.push({ url, postData, json });
+          })
+          .catch(() => debug(`Unparsable response from ${url}`)),
+      );
+    };
+
+    page.on('response', onResponse);
+    try {
+      await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+      if (opts.interact) await opts.interact(page, collected);
+      await Promise.all(pending);
+    } finally {
+      page.off('response', onResponse);
+    }
+    return collected;
+  });
+}
+
+/**
+ * Poll until `collected` satisfies `done`, or the timeout passes. Resolves to
+ * whether it was satisfied; `tick` runs between polls (e.g. to keep scrolling).
+ */
+export async function waitForCollected(
+  collected: CollectedResponse[],
+  done: (c: CollectedResponse[]) => boolean,
+  timeoutMs: number,
+  tick?: () => Promise<void>,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (done(collected)) return true;
+    if (tick) await tick();
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  return done(collected);
 }
 
 /** Warm the session once (loads Shopee so the anti-fraud SDK initialises). */

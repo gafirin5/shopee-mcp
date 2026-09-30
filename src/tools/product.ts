@@ -1,24 +1,25 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { shopeeCapture, shopeeUrl } from '../api/client.js';
-import { BASE_URL } from '../browser/session.js';
+import { BASE_URL, CURRENCY } from '../browser/session.js';
 import { cache } from '../utils/cache.js';
 import { withErrorHandling, truncate } from '../utils/errors.js';
 import { findVideoInfo } from '../utils/media.js';
-import type { PdpResponse, PdpPriceValue } from '../api/types.js';
+import { formatPrice } from '../utils/price.js';
+import type {
+  PdpResponse,
+  PdpPriceValue,
+  PdpAttribute,
+  PdpShipping,
+  PdpShop,
+} from '../api/types.js';
 
-// Shopee stores prices as the real amount × 100000.
-function fmt(raw: number, currency = 'IDR'): string {
-  const amount = raw / 100000;
-  if (currency === 'IDR') return `Rp${Math.round(amount).toLocaleString('id-ID')}`;
-  return `${currency} ${amount.toLocaleString('id-ID')}`;
-}
-
-function priceText(p: PdpPriceValue, currency: string): string {
+/** Render a PDP price value, which is either a single price or a range. */
+export function priceText(p: PdpPriceValue, currency: string): string {
   if (p.range_min >= 0 && p.range_max >= 0 && p.range_min !== p.range_max) {
-    return `${fmt(p.range_min, currency)} – ${fmt(p.range_max, currency)}`;
+    return `${formatPrice(p.range_min, currency)} – ${formatPrice(p.range_max, currency)}`;
   }
-  return fmt(p.single_value, currency);
+  return formatPrice(p.single_value, currency);
 }
 
 /** Parse "shopId/itemId" out of a Shopee product URL, if present. */
@@ -31,10 +32,84 @@ export function parseProductUrl(url: string): { shopId: string; itemId: string }
   return null;
 }
 
+/**
+ * Resolve a product from explicit IDs or a URL. Every product-scoped tool takes
+ * the same trio of optional inputs, so they share one resolver.
+ */
+export function resolveProductIds(
+  shopId?: string,
+  itemId?: string,
+  url?: string,
+): { shopId: string; itemId: string } | null {
+  if (shopId && itemId) return { shopId, itemId };
+  return url ? parseProductUrl(url) : null;
+}
+
+/**
+ * Real spec rows only. Shopee mixes in synthetic rows (stock labels) with a
+ * null id, and fills blank specs with "-".
+ */
+export function specLines(attrs: PdpAttribute[] | null | undefined, max = 12): string[] {
+  return (attrs ?? [])
+    .filter((a) => a.id !== null && a.id !== undefined && a.value && a.value.trim() !== '-')
+    .slice(0, max)
+    .map((a) => `  • ${a.name}: ${a.value}`);
+}
+
+/** Shipping origin, fee range, free-shipping threshold and the fastest delivery estimate. */
+export function shippingLines(ship: PdpShipping | null | undefined, currency: string): string[] {
+  if (!ship) return [];
+  const lines: string[] = [];
+  const from = ship.shipping_fee_info?.ship_from_location;
+  if (from) lines.push(`  📍 Ships from: ${from}`);
+
+  const fee = ship.shipping_fee_info?.price;
+  if (fee) {
+    // A single_value of -1 means "see the range"; a 0-0 range is free.
+    if (fee.single_value >= 0)
+      lines.push(`  💸 Shipping fee: ${formatPrice(fee.single_value, currency)}`);
+    else if (fee.range_max > 0) lines.push(`  💸 Shipping fee: ${priceText(fee, currency)}`);
+  }
+
+  const min = ship.free_shipping?.min_spend;
+  if (ship.free_shipping?.has_fss && min && min.single_value > 0) {
+    lines.push(`  🚚 Free shipping on orders over ${formatPrice(min.single_value, currency)}`);
+  }
+
+  for (const ch of (ship.ungrouped_channel_infos ?? []).slice(0, 3)) {
+    const edt = ch.channel_delivery_info?.edt_text;
+    if (edt) lines.push(`  🕒 ${ch.name}: ${edt}`);
+  }
+  return lines;
+}
+
+/** One-glance seller summary from the shop block bundled with the listing. */
+export function sellerLines(shop: PdpShop | null | undefined): string[] {
+  if (!shop) return [];
+  const badges = [
+    shop.is_official_shop ? 'Shopee Mall' : '',
+    shop.is_preferred_plus_seller ? 'Star+' : '',
+    shop.is_shopee_verified ? 'Verified' : '',
+  ].filter(Boolean);
+  const stats = [
+    shop.rating_star ? `⭐ ${shop.rating_star.toFixed(1)}` : '',
+    shop.response_rate !== undefined ? `💬 ${shop.response_rate}% response` : '',
+    shop.follower_count !== undefined
+      ? `👥 ${shop.follower_count.toLocaleString('id-ID')} followers`
+      : '',
+  ].filter(Boolean);
+  return [
+    `  🏪 ${shop.name}${badges.length ? ` [${badges.join(', ')}]` : ''} — Shop ID \`${shop.shopid}\``,
+    stats.length ? `  ${stats.join(' | ')}` : '',
+    shop.vacation ? '  🏖 Seller is on vacation — orders may be delayed' : '',
+  ].filter(Boolean);
+}
+
 export function registerProductTools(server: McpServer): void {
   server.tool(
     'get_product_detail',
-    'Get details for a Shopee product: title, price (and discount), brand, condition, category, rating, stock, seller location, and description. ' +
+    'Get details for a Shopee product: title, price (and discount), brand, condition, category, rating, stock, specs, ' +
+      'shipping (origin, fee, free-shipping threshold, delivery estimate), seller summary, and description. ' +
       'Provide the numeric shopId + itemId (from search_products), or a full product URL.',
     {
       shopId: z
@@ -48,18 +123,11 @@ export function registerProductTools(server: McpServer): void {
         .optional()
         .describe('Full product URL, e.g. https://shopee.co.id/product/78730497/47060432055'),
     },
+    { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
     async ({ shopId, itemId, url }) => {
       return withErrorHandling(async () => {
-        let sid = shopId;
-        let iid = itemId;
-        if ((!sid || !iid) && url) {
-          const parsed = parseProductUrl(url);
-          if (parsed) {
-            sid = parsed.shopId;
-            iid = parsed.itemId;
-          }
-        }
-        if (!sid || !iid) {
+        const ids = resolveProductIds(shopId, itemId, url);
+        if (!ids) {
           return {
             content: [
               {
@@ -70,6 +138,7 @@ export function registerProductTools(server: McpServer): void {
           };
         }
 
+        const { shopId: sid, itemId: iid } = ids;
         const cacheKey = cache.key('product', sid, iid);
         const cached = cache.get<string>(cacheKey);
         if (cached) return { content: [{ type: 'text', text: cached }] };
@@ -90,7 +159,9 @@ export function registerProductTools(server: McpServer): void {
           };
         }
 
-        const currency = item.currency || 'IDR';
+        // Shopee omits the currency on some regions' responses; fall back to the
+        // one implied by SHOPEE_DOMAIN rather than assuming Indonesia.
+        const currency = item.currency || CURRENCY;
         const price = priceText(pp.price, currency);
         const before =
           pp.price_before_discount && pp.price_before_discount.single_value > pp.price.single_value
@@ -135,6 +206,19 @@ export function registerProductTools(server: McpServer): void {
           `  📍 Location: ${item.shop_location || 'N/A'}`,
           `  🆔 Item ID: \`${item.item_id}\` | Shop ID: \`${item.shop_id}\``,
         ].filter((l) => l !== '');
+
+        const specs = specLines(data.data?.product_attributes?.attrs);
+        if (specs.length) lines.push('', '🧾 **Specs:**', ...specs);
+        const shipping = shippingLines(data.data?.product_shipping, currency);
+        if (shipping.length) lines.push('', '🚚 **Shipping:**', ...shipping);
+        const seller = sellerLines(data.data?.shop_detailed);
+        if (seller.length) lines.push('', '🏪 **Seller:**', ...seller);
+        if (item.models && item.models.length > 1) {
+          lines.push(
+            '',
+            `🎚 ${item.models.length} variants — use get_product_variants for per-variant prices.`,
+          );
+        }
 
         if (item.description) {
           lines.push(

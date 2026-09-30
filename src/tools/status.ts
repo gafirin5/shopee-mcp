@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { isLoggedIn, DOMAIN, safetyStatus } from '../browser/session.js';
 import { withErrorHandling } from '../utils/errors.js';
+import { accountToolsSetting, setLoggedIn } from '../account-mode.js';
 
 function fmtTime(ms: number): string {
   return new Date(ms).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
@@ -13,12 +14,19 @@ export function registerStatusTools(server: McpServer): void {
       'Useful to verify setup before calling search_products / get_product_detail, ' +
       'since those fail slowly (a full page load) when the session is signed out.',
     {},
+    { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
     async () => {
       return withErrorHandling(async () => {
         const loggedIn = await isLoggedIn();
+        setLoggedIn(loggedIn);
+        const mode =
+          accountToolsSetting() === 'off'
+            ? 'Account tools are turned off (SHOPEE_ACCOUNT_TOOLS=off) — read-only mode.'
+            : 'Experimental account tools (orders, vouchers, coins, notifications, cart, likes, follows) are enabled.';
         const text = loggedIn
-          ? `✅ Logged in to ${DOMAIN}. search_products and get_product_detail are ready to use.`
-          : `🔒 Not logged in to ${DOMAIN}.\n\nRun \`npm run login\` (or \`shopee-mcp-login\`) once, ` +
+          ? `✅ Logged in to ${DOMAIN}. All discovery tools are ready.\n${mode}`
+          : `🔒 Not logged in to ${DOMAIN} — read-only mode, account tools hidden.\n\n` +
+            `Run \`npm run login\` (or \`shopee-mcp-login\`) once, ` +
             `sign in in the Chromium window that opens, then retry.`;
         return { content: [{ type: 'text', text }] };
       });

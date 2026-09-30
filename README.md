@@ -19,8 +19,9 @@ An MCP ([Model Context Protocol](https://modelcontextprotocol.io/)) server for *
 
 ## What you get
 
-- **Product discovery (buyer side)** — keyword search with sorting & pagination, full product detail (price, discount, stock, ratings, video info), per-shop listings, shop search, review capture, and price comparison across listings.
+- **Product discovery (buyer side)** — keyword search with sorting, **filters** (price range, min rating, seller location, Mall-only) & pagination, full product detail (price, discount, stock, ratings, video info), per-variant prices & stock, shop profiles and catalogues, shop search, review capture, flash-sale listings, and price comparison across listings. Works across Shopee regions (`.co.id`, `.com.my`, `.sg`, `.tw`) with locale-aware currency.
 - **Seller Centre** — portal reads (shop info, wallet/income, analytics, marketing campaigns, orders) and **write actions on your own shop**: price/stock edits, list/unlist, product video upload & removal, chat replies.
+- **Account tools (experimental)** — your own orders, vouchers, coins, notifications and cart, plus actions like add-to-cart, like/follow and voucher claiming. Hidden until the session is confirmed logged in; disable entirely with `SHOPEE_ACCOUNT_TOOLS=off`.
 - **Account-safety gate** — every browser operation passes through jittered rate limiting, hourly/daily budgets, an anti-bot circuit breaker, two-step confirmation for writes, and a JSONL audit log. One account + one IP means _behaviour_ is what gets accounts flagged, so the gate enforces human-like pacing by default.
 
 ## Tools
@@ -29,16 +30,19 @@ All tools live behind one logged-in browser session. Reads are read-only; writes
 
 ### Discovery (buyer side) — read-only
 
-| Tool                  | What it returns                                                                                                                            |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `search_products`     | Keyword search with sorting & pagination — names, prices, sold counts, ratings, seller location, product IDs, URLs.                        |
-| `get_product_detail`  | One product — price & discount, brand, condition, category, rating, review & sold counts, stock, location, description, **video info**.    |
-| `get_shop_products`   | Products of one shop (by shop ref) — names, prices, sales.                                                                                 |
-| `search_shops`        | Shop search by keyword — shop names, IDs, locations, ratings.                                                                              |
-| `get_product_reviews` | Buyer-side review capture (scrolls the product page so the ratings XHR fires).                                                             |
-| `compare_prices`      | Current prices for up to 10 product refs (URL or `shopid:itemid`), 2 s gap between items.                                                  |
-| `check_product_video` | Read-only check (buyer side) whether a listing currently has video media.                                                                  |
-| `check_login_status`  | Whether the saved browser session is currently logged into Shopee — call this before the tools above instead of waiting on a slow failure. |
+| Tool                   | What it returns                                                                                                                                        |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `search_products`      | Keyword search with sorting, **filters** (price range, min rating, location, Mall-only) & pagination — names, prices, sold counts, ratings, IDs, URLs. |
+| `get_product_detail`   | One product — price & discount, brand, condition, category, rating, review & sold counts, stock, location, description, **video info**.                |
+| `get_product_variants` | Every variant of a listing — model IDs, names, per-variant prices and availability; opt into exact stock counts.                                       |
+| `get_product_reviews`  | Rating summary (star breakdown) and pages of buyer reviews — filter by stars, comments, or media.                                                      |
+| `get_shop_info`        | A seller's profile by shop ID **or username** — badges, rating, product/follower counts, chat response rate & time.                                    |
+| `get_shop_products`    | One shop's catalogue with sorting (popular/newest/top sales/price) & pagination. Accepts a shop ID, shop URL, or product URL.                          |
+| `search_shops`         | Shop search by keyword — shop names, IDs, locations.                                                                                                   |
+| `get_flash_sale`       | The current Flash Sale — session window, upcoming sessions, deals with flash vs. original price and claimed stock.                                     |
+| `compare_prices`       | Current prices for up to 10 product refs (URL or `shopid:itemid`), 2 s gap between items.                                                              |
+| `check_product_video`  | Read-only check (buyer side) whether a listing currently has video media.                                                                              |
+| `check_login_status`   | Whether the saved browser session is currently logged into Shopee — call this before the tools above instead of waiting on a slow failure.             |
 
 ### Seller Centre — reads
 
@@ -48,7 +52,7 @@ Reachable via the same browser profile (`seller.shopee.co.id` — the portal usu
 | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | `check_seller_login`                                                                           | Whether the Seller Centre portal is reachable with the current session.                |
 | `get_seller_shop_info` / `get_seller_income` / `get_seller_analytics` / `get_seller_marketing` | Portal reads — shop profile, wallet, performance, campaigns.                           |
-| `list_orders` / `get_order_detail`                                                             | Order management reads from the portal.                                                |
+| `list_orders` / `get_seller_order_detail`                                                      | Order management reads for your own shop from the portal.                              |
 | `list_seller_products`                                                                         | Your product list with IDs, price/stock when present.                                  |
 | `seller_api_probe`                                                                             | Navigate any portal page and capture the first matching XHR JSON — endpoint discovery. |
 
@@ -57,6 +61,21 @@ Reachable via the same browser profile (`seller.shopee.co.id` — the portal usu
 | Tool                       | What it returns                      |
 | -------------------------- | ------------------------------------ |
 | `list_chats` / `read_chat` | List conversations; read one thread. |
+
+### Account tools (experimental)
+
+Reads of **your own** buyer account, plus the only tools anywhere in this server that can modify the account. They stay hidden until the session is confirmed logged in; turn them off with `SHOPEE_ACCOUNT_TOOLS=off`.
+
+| Tool                                    | What it does                                                                                                                        |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `get_orders` / `get_order_detail`       | Your orders by tab (all, to ship, to receive, completed, cancelled) — status, shop, items, totals; one order's timeline & tracking. |
+| `get_my_vouchers` / `get_shop_vouchers` | Vouchers in your wallet; a shop's claimable vouchers and which ones you've claimed.                                                 |
+| `get_coins`                             | Shopee Coins balance and recent coin transactions.                                                                                  |
+| `get_notifications`                     | Order updates, promotions, or Shopee announcements.                                                                                 |
+| `get_cart`                              | Your cart grouped by shop — items, variants, quantities, prices, model IDs.                                                         |
+| `add_to_cart` / `update_cart_item`      | Add a product (exact variant via `modelId`) in a quantity of 1-20; change a line's quantity, or remove it with `quantity: 0`.       |
+| `like_product` / `follow_shop`          | Like/unlike a product; follow/unfollow a shop.                                                                                      |
+| `claim_shop_voucher`                    | Claim one of a shop's vouchers into your wallet (a claim can't be undone).                                                          |
 
 ### Write actions — gated
 
@@ -184,24 +203,26 @@ Every browser operation — read or write — passes through one account-safety 
 
 All optional — copy `.env.example` to `.env` to override. Full explanations: [docs/CONFIGURATION.md](./docs/CONFIGURATION.md).
 
-| Variable                                | Default                        | Purpose                                                     |
-| --------------------------------------- | ------------------------------ | ----------------------------------------------------------- |
-| `SHOPEE_DOMAIN`                         | `shopee.co.id`                 | Regional Shopee domain.                                     |
-| `SHOPEE_PROFILE_DIR`                    | `~/.shopee-mcp/chrome-profile` | Where the saved login lives.                                |
-| `SHOPEE_SELLER_PROFILE_DIR`             | (same profile)                 | Isolate the Seller Centre realm in its own profile.         |
-| `SHOPEE_HEADLESS`                       | `false`                        | Keep `false` — headless is detected.                        |
-| `CACHE_TTL_MS`                          | `30000`                        | In-memory cache lifetime.                                   |
-| `SHOPEE_ENABLE_SELLER_WRITES`           | `false`                        | Master switch for all seller-side write tools.              |
-| `SHOPEE_READ_SPACING_MS` (+ `_SPREAD`)  | `3000` (+ `3000`)              | Jittered delay between reads.                               |
-| `SHOPEE_WRITE_SPACING_MS` (+ `_SPREAD`) | `60000` (+ `120000`)           | Jittered delay between writes.                              |
-| `SHOPEE_READ_MAX_PER_HOUR`              | `30`                           | Read budget per hour.                                       |
-| `SHOPEE_WRITE_MAX_PER_HOUR`             | `10`                           | Write budget per hour.                                      |
-| `SHOPEE_WRITE_MAX_PER_DAY`              | `30`                           | Write budget per day.                                       |
-| `SHOPEE_COOLDOWN_MS`                    | `600000`                       | Anti-bot circuit-breaker cooldown (10 min).                 |
-| `SHOPEE_ACTION_TIMEOUT_MS`              | `60000`                        | UI write-action timeout (uploads, edits).                   |
-| `SHOPEE_ACTION_DELAY_MS`                | `2000`                         | Politeness delay between UI steps.                          |
-| `SHOPEE_VIDEO_MAX_MB`                   | `200`                          | Upload guard — reject larger video files before the portal. |
-| `DEBUG`                                 | `false`                        | Log startup/debug info to stderr.                           |
+| Variable                                | Default                        | Purpose                                                         |
+| --------------------------------------- | ------------------------------ | --------------------------------------------------------------- |
+| `SHOPEE_DOMAIN`                         | `shopee.co.id`                 | Regional Shopee domain (`.co.id`, `.com.my`, `.sg`, `.tw`).     |
+| `SHOPEE_LOCALE` / `SHOPEE_TIMEZONE`     | _derived from domain_          | Browser locale / timezone override.                             |
+| `SHOPEE_PROFILE_DIR`                    | `~/.shopee-mcp/chrome-profile` | Where the saved login lives.                                    |
+| `SHOPEE_SELLER_PROFILE_DIR`             | (same profile)                 | Isolate the Seller Centre realm in its own profile.             |
+| `SHOPEE_HEADLESS`                       | `false`                        | Keep `false` — headless is detected.                            |
+| `SHOPEE_ACCOUNT_TOOLS`                  | `auto`                         | `auto`: account tools while logged in; `off`: always read-only. |
+| `CACHE_TTL_MS`                          | `30000`                        | In-memory cache lifetime.                                       |
+| `SHOPEE_ENABLE_SELLER_WRITES`           | `false`                        | Master switch for all seller-side write tools.                  |
+| `SHOPEE_READ_SPACING_MS` (+ `_SPREAD`)  | `3000` (+ `3000`)              | Jittered delay between reads.                                   |
+| `SHOPEE_WRITE_SPACING_MS` (+ `_SPREAD`) | `60000` (+ `120000`)           | Jittered delay between writes.                                  |
+| `SHOPEE_READ_MAX_PER_HOUR`              | `30`                           | Read budget per hour.                                           |
+| `SHOPEE_WRITE_MAX_PER_HOUR`             | `10`                           | Write budget per hour.                                          |
+| `SHOPEE_WRITE_MAX_PER_DAY`              | `30`                           | Write budget per day.                                           |
+| `SHOPEE_COOLDOWN_MS`                    | `600000`                       | Anti-bot circuit-breaker cooldown (10 min).                     |
+| `SHOPEE_ACTION_TIMEOUT_MS`              | `60000`                        | UI write-action timeout (uploads, edits).                       |
+| `SHOPEE_ACTION_DELAY_MS`                | `2000`                         | Politeness delay between UI steps.                              |
+| `SHOPEE_VIDEO_MAX_MB`                   | `200`                          | Upload guard — reject larger video files before the portal.     |
+| `DEBUG`                                 | `false`                        | Log startup/debug info to stderr.                               |
 
 ## Why a browser?
 

@@ -77,8 +77,8 @@ export function registerSellerOrderTools(server: McpServer): void {
   );
 
   server.tool(
-    'get_order_detail',
-    'Fetch one order detail (items, buyer, payment, shipping) from the Seller Centre.',
+    'get_seller_order_detail',
+    'Fetch one Seller Centre order detail (items, buyer, payment, shipping) for your own shop.',
     {
       order_id: z.string().min(1).describe('The numeric order id (from list_orders)'),
     },

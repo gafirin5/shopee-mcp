@@ -24,6 +24,8 @@ We aim to acknowledge reports within a few days and coordinate disclosure after 
 This is a **local MCP server** that reads **public** Shopee product data through a **logged-in browser session** (Shopee blocks anonymous requests). Be aware:
 
 - Your **session lives on your machine** under `~/.shopee-mcp/chrome-profile` (configurable via `SHOPEE_PROFILE_DIR`). Treat that directory like a password. It is never transmitted anywhere by this server, and the repo **gitignores** local profile/state.
-- The server is **read-only** — it performs product search and detail lookups only; there are no seller or account actions.
+- **Signed out, the server is read-only** — public product, review, shop and flash-sale lookups; no account actions.
+- **Signed in, experimental account mode** also offers tools that read your own data (orders, cart, vouchers, coins, notifications) and that **modify your account**: add/update/remove cart items, like/unlike products, follow/unfollow shops, and claim shop vouchers. Nothing in this server checks out, pays, changes addresses, payment methods or passwords, or sends chat messages; order detail omits your address and phone number.
+- Set `SHOPEE_ACCOUNT_TOOLS=off` to keep a logged-in server read-only. Only use account mode with an MCP client you trust to ask before acting — write tools are annotated `readOnlyHint: false` so clients can prompt for them.
 
 Issues in **Shopee's services**, **CloakBrowser**, or **upstream** dependencies (e.g. `@modelcontextprotocol/sdk`, `playwright`) should be reported to those projects when appropriate.

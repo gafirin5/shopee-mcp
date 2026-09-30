@@ -1,4 +1,5 @@
 import { ShopeeAPIError, ShopeeAuthRequiredError } from '../api/client.js';
+import { setLoggedIn } from '../account-mode.js';
 
 /**
  * Wraps a tool handler to return a clean MCP error content block
@@ -13,6 +14,8 @@ export async function withErrorHandling(
     let message: string;
 
     if (err instanceof ShopeeAuthRequiredError) {
+      // The session is gone: fall back to read-only mode until it's back.
+      setLoggedIn(false);
       message =
         '🔒 Not signed in to Shopee.\n\n' +
         'Shopee blocks anonymous product requests. Run this once in the project folder:\n' +
