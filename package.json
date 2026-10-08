@@ -29,7 +29,7 @@
     "login:seller": "tsx src/login-seller.ts",
     "dev": "tsx watch src/index.ts",
     "start": "node build/index.js",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",

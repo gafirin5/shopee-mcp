@@ -2,8 +2,8 @@ import { captureJson, isLoggedIn, BASE_URL } from '../browser/session.js';
 import type { CaptureOptions, CaptureResult } from '../browser/session.js';
 import { sleep } from '../actions/base.js';
 
-type CaptureFn = <T>(pageUrl: string, opts: CaptureOptions) => Promise<CaptureResult<T>>;
-type LoginCheckFn = () => Promise<boolean>;
+export type CaptureFn = <T>(pageUrl: string, opts: CaptureOptions) => Promise<CaptureResult<T>>;
+export type LoginCheckFn = () => Promise<boolean>;
 
 /** Shopee's anti-bot/anti-fraud rejection — almost always means "not logged in / detected". */
 export const SHOPEE_ANTIBOT_ERROR = 90309999;

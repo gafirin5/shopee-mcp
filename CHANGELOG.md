@@ -13,6 +13,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Ver
 - **Chat**: `list_chats`, `read_chat`, `send_chat_reply`.
 - **Buyer extras**: `get_shop_products`, `search_shops`, video info in `get_product_detail`, `check_product_video`, `shopee_video_probe`, `compare_prices`.
 - `test/tools.ts` (`npm run test:tools`): offline registry test that builds the real server and lists its tools; wired into CI.
+- `npm run typecheck` now also checks `test/` (via `tsconfig.test.json`); it previously compiled only `src/`, and two test doubles had quietly drifted from the real `CaptureFn` shape.
 
 ### Changed
 

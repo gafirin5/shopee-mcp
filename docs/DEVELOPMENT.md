@@ -2,20 +2,20 @@
 
 ## Scripts
 
-| Command                | Description                                                  |
-| ---------------------- | ------------------------------------------------------------ |
-| `npm install`          | Install dependencies (also fetches the CloakBrowser binary)  |
-| `npm run login`        | One-time: open a browser window and log into Shopee          |
-| `npm run login:seller` | One-time: sign into the Seller Centre portal (usually SSO)   |
-| `npm run build`        | Compile TypeScript to `build/` (`tsc`)                       |
-| `npm run dev`          | Watch mode: `tsx watch src/index.ts`                         |
-| `npm run start`        | Run compiled server: `node build/index.js`                   |
-| `npm run lint`         | ESLint over the repo                                         |
-| `npm run format`       | Prettier write; `npm run format:check` to verify             |
-| `npm run typecheck`    | `tsc --noEmit`, strict, with unused-symbol checks            |
-| `npm run test:unit`    | Offline unit tests for pure helpers — no login, no display   |
-| `npm run test:tools`   | Offline registry test: builds the server and lists its tools |
-| `npm test`             | **Live smoke test** — needs a login and a display            |
+| Command                | Description                                                     |
+| ---------------------- | --------------------------------------------------------------- |
+| `npm install`          | Install dependencies (also fetches the CloakBrowser binary)     |
+| `npm run login`        | One-time: open a browser window and log into Shopee             |
+| `npm run login:seller` | One-time: sign into the Seller Centre portal (usually SSO)      |
+| `npm run build`        | Compile TypeScript to `build/` (`tsc`)                          |
+| `npm run dev`          | Watch mode: `tsx watch src/index.ts`                            |
+| `npm run start`        | Run compiled server: `node build/index.js`                      |
+| `npm run lint`         | ESLint over the repo                                            |
+| `npm run format`       | Prettier write; `npm run format:check` to verify                |
+| `npm run typecheck`    | `tsc --noEmit`, strict, with unused-symbol checks (src + tests) |
+| `npm run test:unit`    | Offline unit tests for pure helpers — no login, no display      |
+| `npm run test:tools`   | Offline registry test: builds the server and lists its tools    |
+| `npm test`             | **Live smoke test** — needs a login and a display               |
 
 ## Project layout
 
@@ -48,6 +48,11 @@ test/
   tools.ts          # offline tool-registry test (npm run test:tools)
   smoke.ts          # the npm test health check (live)
 ```
+
+`tsconfig.json` compiles `src/` only — that is what ships. `tsconfig.test.json`
+typechecks `src/` **and** `test/` together, which is what `npm run typecheck`
+runs: the test files are not part of the published build, but a test double that
+drifts from the real signature stops being a test.
 
 ## Why a browser is required
 

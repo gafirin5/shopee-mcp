@@ -17,6 +17,8 @@ import {
 } from '../src/tools/product.js';
 import { formatPrice } from '../src/utils/price.js';
 import { shopeeCapture, requireLogin, ShopeeAuthRequiredError } from '../src/api/client.js';
+import type { CaptureFn } from '../src/api/client.js';
+import type { CaptureResult } from '../src/browser/session.js';
 import { cache } from '../src/utils/cache.js';
 import { regionFor } from '../src/browser/session.js';
 import { findArray, previewRow, formatSellerPayload } from '../src/tools/seller/format.js';
@@ -503,12 +505,26 @@ test('regionFor: matches on the TLD suffix, not a substring elsewhere', () => {
 const loggedIn = async () => true;
 const loggedOut = async () => false;
 
+/**
+ * A capture double that satisfies the real `CaptureFn` shape (generic over T).
+ * The tests below used to return ad-hoc objects, which went unnoticed because
+ * tsconfig only typechecks src/ — see tsconfig.test.json.
+ */
+const captureStub = (json: unknown): CaptureFn => {
+  const fn = async <T>(): Promise<CaptureResult<T>> => ({
+    json: json as T,
+    matchedUrl: 'https://x/api/v4/stub',
+  });
+  return fn;
+};
+
 test('shopeeCapture: recovers from a single timeout via retry, no auth error', async () => {
   let calls = 0;
-  const flakyCapture = async () => {
+  const ok = captureStub({ error: 0, items: [] });
+  const flakyCapture: CaptureFn = async (...args) => {
     calls++;
     if (calls === 1) throw new Error('Timeout 30000ms exceeded');
-    return { json: { error: 0, items: [] }, matchedUrl: 'https://x/api/v4/search' };
+    return ok(...args);
   };
   const result = await shopeeCapture(
     'https://x',
@@ -848,12 +864,22 @@ test('shopeeCapture: signed out fails fast, without spending the capture budget'
   // The whole point: a logged-out user must get the login prompt immediately
   // rather than after a timeout (plus retry) that outlives the client's patience.
   let calls = 0;
-  const capture = async () => {
+  // Never reached: the signed-out check must fail before the capture runs.
+  const capture = captureStub({ error: 0 });
+  const countingCapture: CaptureFn = async (...args) => {
     calls++;
-    return { error: 0 };
+    return capture(...args);
   };
   await assert.rejects(
-    () => shopeeCapture('https://x', 'search/search_items', undefined, false, capture, loggedOut),
+    () =>
+      shopeeCapture(
+        'https://x',
+        'search/search_items',
+        undefined,
+        false,
+        countingCapture,
+        loggedOut,
+      ),
     ShopeeAuthRequiredError,
   );
   assert.equal(calls, 0);
