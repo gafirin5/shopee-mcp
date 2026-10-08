@@ -12,11 +12,19 @@
  * Run with: npm run test:tools
  */
 import assert from 'node:assert/strict';
+import { readFileSync, readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { createServer } from '../src/server.js';
 import { accountToolsSetting, setLoggedIn } from '../src/account-mode.js';
+
+const root = fileURLToPath(new URL('..', import.meta.url));
+const readme = readFileSync(join(root, 'README.md'), 'utf-8');
+const configuration = readFileSync(join(root, 'docs/CONFIGURATION.md'), 'utf-8');
+const envExample = readFileSync(join(root, '.env.example'), 'utf-8');
 
 let failures = 0;
 
@@ -77,6 +85,17 @@ async function main(): Promise<void> {
 
   const signedOut = (await client.listTools()).tools;
 
+  // The account writes only exist in the signed-in list, so build the union of
+  // both states up front; the tool-level checks below run against it. Account
+  // mode is put back to signed-out immediately so the rest of the test sees the
+  // same state a fresh server would.
+  const allTools = [...signedOut];
+  if (accountToolsSetting() === 'auto') {
+    setLoggedIn(true);
+    allTools.push(...(await client.listTools()).tools);
+    setLoggedIn(false);
+  }
+
   check('server builds and registers its tools', () => {
     assert.ok(signedOut.length > 0, 'no tools registered');
     assert.ok(signedOut.length >= 30, `expected >= 30 tools, got ${signedOut.length}`);
@@ -99,14 +118,6 @@ async function main(): Promise<void> {
     assert.deepEqual(missing, [], `tool(s) without readOnlyHint: ${missing.join(', ')}`);
   });
 
-  // The account writes only exist in the signed-in list, so build the union:
-  // the write-tool check below has to run against both states.
-  const allTools = [...signedOut];
-  if (accountToolsSetting() === 'auto') {
-    setLoggedIn(true);
-    allTools.push(...(await client.listTools()).tools);
-  }
-
   check('write tools are not advertised as read-only', () => {
     const wrong = WRITE_TOOLS.filter(
       (n) => allTools.find((t) => t.name === n)?.annotations?.readOnlyHint !== false,
@@ -121,6 +132,46 @@ async function main(): Promise<void> {
   check('every tool has a description', () => {
     const missing = signedOut.filter((t) => !t.description?.trim()).map((t) => t.name);
     assert.deepEqual(missing, [], `tool(s) without a description: ${missing.join(', ')}`);
+  });
+
+  // Docs drift guards: a tool nobody documented is a tool nobody can use, and an
+  // env var nobody documented is a setting nobody can find. Both lists are
+  // derived from the code, so they cannot rot.
+  check('every registered tool appears in the README', () => {
+    const undocumented = names(allTools).filter((n) => !readme.includes(`\`${n}\``));
+    assert.deepEqual(
+      undocumented,
+      [],
+      `tool(s) missing from README.md: ${undocumented.join(', ')}`,
+    );
+  });
+
+  check('every env var the code reads is documented', () => {
+    const files: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (entry.name.endsWith('.ts')) files.push(full);
+      }
+    };
+    walk(join(root, 'src'));
+
+    const used = new Set<string>();
+    for (const file of files) {
+      for (const m of readFileSync(file, 'utf-8').matchAll(/process\.env\.([A-Z0-9_]+)/g)) {
+        used.add(m[1]);
+      }
+    }
+    const documented = (name: string): boolean =>
+      readme.includes(name) || configuration.includes(name) || envExample.includes(name);
+    const undocumented = [...used].filter((n) => !documented(n)).sort();
+    assert.ok(used.size > 5, `expected to find env vars in src/, found ${used.size}`);
+    assert.deepEqual(
+      undocumented,
+      [],
+      `env var(s) read by the code but not documented in README/docs/.env.example: ${undocumented.join(', ')}`,
+    );
   });
 
   check('account tools are hidden while signed out', () => {

@@ -15,6 +15,7 @@ import { BASE_URL, CURRENCY, captureAll, waitForCollected } from '../browser/ses
 import type { CollectedResponse } from '../browser/session.js';
 import { registerAccountTool } from '../account-mode.js';
 import { withErrorHandling } from '../utils/errors.js';
+import { confirmGate } from '../utils/confirm.js';
 import { formatPrice } from '../utils/price.js';
 import { resolveProductIds } from './product.js';
 import { voucherBenefit, formatDateTime } from './account.js';
@@ -241,14 +242,29 @@ export function registerActionTools(server: McpServer): void {
     server.tool(
       'claim_shop_voucher',
       '[Experimental — modifies your Shopee account] Claim (save) one of a shop’s vouchers into your voucher ' +
-        'wallet, via the shop page’s own Claim button. Get the code from get_shop_vouchers. A claim cannot be undone.',
+        'wallet, via the shop page’s own Claim button. Get the code from get_shop_vouchers. A claim cannot be ' +
+        'undone, so it requires confirm=true (a preview is returned otherwise).',
       {
         shopId: z.string().regex(/^\d+$/).describe('Numeric shop ID'),
         voucherCode: z.string().min(1).describe('Voucher code from get_shop_vouchers'),
+        confirm: z
+          .boolean()
+          .default(false)
+          .describe(
+            'Must be true to claim; false returns a preview only (a claim cannot be undone)',
+          ),
       },
       { ...WRITE, idempotentHint: true },
-      async ({ shopId, voucherCode }) =>
+      async ({ shopId, voucherCode, confirm }) =>
         withErrorHandling(async () => {
+          // Irreversible (Shopee has no "unclaim"), so it gets the same
+          // two-step gate as the Seller Centre writes.
+          const gate = confirmGate(
+            confirm,
+            `Claim voucher \`${voucherCode}\` from shop \`${shopId}\` into your voucher wallet. ` +
+              'A claim cannot be undone.',
+          );
+          if (gate) return gate;
           await requireLogin();
           let outcome: string | undefined;
           let target: ShopVoucher | undefined;

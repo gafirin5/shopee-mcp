@@ -1,4 +1,4 @@
-import type { Page } from 'playwright';
+import type { Page, Locator } from 'playwright';
 import { withSellerAction, stepDelay } from '../../actions/base.js';
 import {
   openProductEdit,
@@ -15,74 +15,146 @@ interface NumericUpdateArgs {
   variationIndex?: number;
 }
 
-async function fillNumericField(
-  page: Page,
-  locator: { fill: (v: string) => Promise<void>; press: (key: string) => Promise<void> },
-  value: number,
-): Promise<void> {
-  await locator.fill(String(value));
-  // Blur so the SPA picks up the change event before we save.
-  await locator.press('Tab').catch(() => {});
-  await page.waitForTimeout(300);
+type FieldKind = 'price' | 'stock';
+
+/**
+ * Does a field's rendered text represent `value`?
+ *
+ * The portal reformats what you type (grouping separators, and a decimal part
+ * on currencies that use one), so an exact string comparison would report
+ * false failures: "150.000" is 150000 on the Indonesian portal, "150.00" is 150
+ * on the Malaysian one. Accept the intended value under either reading — the
+ * point of the check is to catch a field that did NOT receive our number (empty,
+ * unchanged, or a different row), not to police formatting.
+ */
+export function numericMatches(shown: string, value: number): boolean {
+  const s = shown.trim();
+  if (s === '') return false;
+  if (s.replace(/[^\d]/g, '') === String(value)) return true;
+  const asDecimal = Number(s.replace(/[^\d.-]/g, ''));
+  const asGrouped = Number(s.replace(/[^\d]/g, ''));
+  return asDecimal === value || asGrouped === value;
+}
+
+async function readField(locator: Locator | undefined): Promise<string> {
+  if (!locator) return '';
+  return (await locator.inputValue().catch(() => '')) || '';
 }
 
 /**
- * Update a product's price via the Seller Centre edit page.
- * One action per call; the caller sees every step in the result text.
+ * Update one numeric field (price or stock) on the Seller Centre edit page.
+ *
+ * Three guards exist because this is the action that moves money:
+ *
+ *  1. the edit URL is verified to contain the item id before anything is typed
+ *     (the edit path is the least-verified portal path we use — a redirect or a
+ *     path change would otherwise edit whatever page happened to load);
+ *  2. when the page exposes several inputs (one per variation) and the caller
+ *     did not say which one, the action refuses instead of silently editing the
+ *     first row;
+ *  3. the typed value is read back before Save, and re-read from a freshly
+ *     loaded edit page after Save — so the result says whether Shopee actually
+ *     stored it instead of trusting the toast.
  */
-export async function updateProductPrice(args: NumericUpdateArgs): Promise<string> {
+async function applyNumericUpdate(kind: FieldKind, args: NumericUpdateArgs): Promise<string> {
   const { itemId, value, variationIndex } = args;
-  if (value <= 0) throw new Error('Price must be a positive number (no separators).');
+  const label = kind === 'price' ? 'Price' : 'Stock';
+  const inputsFor = kind === 'price' ? getPriceInputs : getStockInputs;
+  const where =
+    `product ${itemId}` + (variationIndex !== undefined ? ` (variation ${variationIndex})` : '');
+
   return withSellerAction(
-    'update-price',
+    kind === 'price' ? 'update-price' : 'update-stock',
     async (page: Page) => {
       await openProductEdit(page, itemId);
+      // Only object when the URL names a *different* product. The edit path is
+      // the least-verified portal path we use, so a redirect to another
+      // product's editor must not be typed into — but a URL that simply carries
+      // no id (a bare SPA editor, a hash route) is fine and must not block a
+      // working flow.
+      const urlProductId = /\/product\/(\d+)/.exec(page.url())?.[1];
+      if (urlProductId && urlProductId !== itemId) {
+        throw new Error(
+          `The edit page for product ${itemId} landed on a different product (${urlProductId}). ` +
+            'Nothing was changed.',
+        );
+      }
       await stepDelay();
-      const inputs = await getPriceInputs(page);
+
+      let inputs: Locator[];
+      try {
+        inputs = await inputsFor(page);
+      } catch (err) {
+        // The landed URL is the first thing to look at when a selector breaks.
+        throw new Error(`${err instanceof Error ? err.message : err} (landed on ${page.url()})`, {
+          cause: err,
+        });
+      }
+      if (inputs.length > 1 && variationIndex === undefined) {
+        throw new Error(
+          `This listing's edit page exposes ${inputs.length} ${kind} inputs (one per variation), ` +
+            `so an explicit \`variation_index\` is required — refusing to guess which row to edit. ` +
+            `Re-run with variation_index: 0-${inputs.length - 1} (0 = the first ${kind} row on the page). ` +
+            'Nothing was changed.',
+        );
+      }
       const idx = variationIndex ?? 0;
       if (idx >= inputs.length) {
         throw new Error(
-          `variation_index ${idx} is out of range — the edit page exposes ${inputs.length} price input(s). ` +
-            'For variation products, pass the 0-based model index.',
+          `variation_index ${idx} is out of range — the edit page exposes ${inputs.length} ${kind} input(s). ` +
+            'For variation products, pass the 0-based model index. Nothing was changed.',
         );
       }
-      await fillNumericField(page, inputs[idx], value);
+
+      await inputs[idx].fill(String(value));
+      // Blur so the SPA picks up the change event before we save.
+      await inputs[idx].press('Tab').catch(() => {});
+      await page.waitForTimeout(300);
+
+      // Guard 3a: the field must actually hold our number before we save.
+      const typed = await readField(inputs[idx]);
+      if (!numericMatches(typed, value)) {
+        throw new Error(
+          `The ${kind} field still reads "${typed || '(empty)'}" after typing ${value} — nothing was saved. ` +
+            'The portal may have rejected or reformatted the value.',
+        );
+      }
+
       const saved = await saveProduct(page);
       if (!saved) {
-        throw new Error('Save clicked but no success toast appeared — verify on the edit page.');
+        throw new Error(
+          'Save was clicked but no success toast appeared — verify on the edit page. Nothing else was changed.',
+        );
       }
-      return `💰 Price for product ${itemId}${variationIndex !== undefined ? ` (variation ${variationIndex})` : ''} set to ${value.toLocaleString('en-US')} and saved.`;
+
+      // Guard 3b: prove it persisted, from a fresh page load.
+      await openProductEdit(page, itemId);
+      await stepDelay();
+      const after = await inputsFor(page).catch((): Locator[] => []);
+      const shownAfter = await readField(after[idx]);
+      if (numericMatches(shownAfter, value)) {
+        return `💰 ${label} for ${where} set to ${value.toLocaleString('en-US')} and saved (re-read the edit page to confirm).`;
+      }
+      return (
+        `⚠️ ${label} for ${where}: Save reported success, but the edit page now shows ` +
+        `"${shownAfter || '(empty)'}" instead of ${value.toLocaleString('en-US')}. ` +
+        'Check the product in Seller Centre before relying on this.'
+      );
     },
-    `item ${itemId} price → ${value}`,
+    `item ${itemId} ${kind} → ${value} (row ${variationIndex ?? 0})`,
   );
 }
 
-/** Update a product's stock via the Seller Centre edit page. */
+/** Set a product's price via the Seller Centre edit page. */
+export async function updateProductPrice(args: NumericUpdateArgs): Promise<string> {
+  if (args.value <= 0) throw new Error('Price must be a positive number (no separators).');
+  return applyNumericUpdate('price', args);
+}
+
+/** Set a product's stock level via the Seller Centre edit page. */
 export async function updateProductStock(args: NumericUpdateArgs): Promise<string> {
-  const { itemId, value, variationIndex } = args;
-  if (value < 0) throw new Error('Stock cannot be negative.');
-  return withSellerAction(
-    'update-stock',
-    async (page: Page) => {
-      await openProductEdit(page, itemId);
-      await stepDelay();
-      const inputs = await getStockInputs(page);
-      const idx = variationIndex ?? 0;
-      if (idx >= inputs.length) {
-        throw new Error(
-          `variation_index ${idx} is out of range — the edit page exposes ${inputs.length} stock input(s). ` +
-            'For variation products, pass the 0-based model index.',
-        );
-      }
-      await fillNumericField(page, inputs[idx], value);
-      const saved = await saveProduct(page);
-      if (!saved) {
-        throw new Error('Save clicked but no success toast appeared — verify on the edit page.');
-      }
-      return `📦 Stock for product ${itemId}${variationIndex !== undefined ? ` (variation ${variationIndex})` : ''} set to ${value} and saved.`;
-    },
-    `item ${itemId} stock → ${value}`,
-  );
+  if (args.value < 0) throw new Error('Stock cannot be negative.');
+  return applyNumericUpdate('stock', args);
 }
 
 export interface ListingArgs {
@@ -93,7 +165,8 @@ export interface ListingArgs {
  * Flip a product's on/off-sale switch on the Seller Centre list page.
  * `list: true` should only CLICK when the row is currently off — the portal
  * switch carries state, so we read `aria-checked` when present and refuse to
- * toggle into the wrong direction blindly.
+ * toggle into the wrong direction blindly. After clicking, the switch is read
+ * again so the report states what the page actually shows.
  */
 export async function setItemListing(itemId: string, list: boolean): Promise<string> {
   return withSellerAction(list ? 'list-item' : 'unlist-item', async (page: Page) => {
@@ -117,6 +190,18 @@ export async function setItemListing(itemId: string, list: boolean): Promise<str
     if (await confirm.isVisible().catch(() => false)) {
       await confirm.click();
       await page.waitForTimeout(500);
+    }
+
+    // Re-read the switch (the row re-renders after the toggle) so the reply
+    // reports the real state instead of assuming the click worked.
+    const after = await findRowSwitch(page, itemId)
+      .then((s) => s.getAttribute('aria-checked'))
+      .catch(() => null);
+    if (after !== null) {
+      const isOn = after === 'true';
+      return isOn === list
+        ? `✅ Product ${itemId} is now ${list ? 'listed (on sale)' : 'unlisted'}.`
+        : `⚠️ Product ${itemId} still reads ${isOn ? 'on sale' : 'unlisted'} after toggling — check Seller Centre.`;
     }
     return (
       `✅ Toggled product ${itemId} to ${list ? 'listed (on sale)' : 'unlisted'}. ` +

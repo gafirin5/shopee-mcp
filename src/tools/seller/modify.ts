@@ -16,7 +16,10 @@ const numericArgs = {
     .int()
     .min(0)
     .optional()
-    .describe('0-based model index for variation products; omit for simple products'),
+    .describe(
+      'Which variation row to edit (0 = the first on the page). Required for listings with ' +
+        'several variants — the tool refuses to guess rather than edit the wrong one.',
+    ),
   confirm: z
     .boolean()
     .default(false)
