@@ -31,6 +31,15 @@ export interface SafetyConfig {
   /** Max write ops in any rolling hour / calendar day. */
   writeMaxPerHour: number;
   writeMaxPerDay: number;
+  /**
+   * Max Shopee API requests in any rolling hour (0 = report only, no cap).
+   *
+   * Op budgets are what the numbers above count, but one op is rarely one
+   * request: a variant stock lookup clicks a dozen options, `add_to_cart` walks
+   * a whole buy box, and `shopee_video_probe` loads four pages. This is the
+   * budget that actually tracks traffic to Shopee.
+   */
+  apiRequestsMaxPerHour: number;
   /** Circuit-breaker cooldown after an anti-bot block (ms). */
   cooldownMs: number;
 }
@@ -43,6 +52,7 @@ export const DEFAULT_SAFETY: SafetyConfig = {
   readMaxPerHour: 30,
   writeMaxPerHour: 10,
   writeMaxPerDay: 30,
+  apiRequestsMaxPerHour: 0,
   cooldownMs: 10 * 60_000,
 };
 
@@ -60,6 +70,12 @@ function configFromEnv(): SafetyConfig {
     readMaxPerHour: envInt('SHOPEE_READ_MAX_PER_HOUR', DEFAULT_SAFETY.readMaxPerHour),
     writeMaxPerHour: envInt('SHOPEE_WRITE_MAX_PER_HOUR', DEFAULT_SAFETY.writeMaxPerHour),
     writeMaxPerDay: envInt('SHOPEE_WRITE_MAX_PER_DAY', DEFAULT_SAFETY.writeMaxPerDay),
+    // 0 is a meaningful value here (report only), so it is not passed through
+    // envInt — which treats 0 as "unset" and would fall back to the default.
+    apiRequestsMaxPerHour: (() => {
+      const v = parseInt(process.env.SHOPEE_API_REQUESTS_MAX_PER_HOUR ?? '', 10);
+      return Number.isFinite(v) && v > 0 ? v : DEFAULT_SAFETY.apiRequestsMaxPerHour;
+    })(),
     cooldownMs: envInt('SHOPEE_COOLDOWN_MS', DEFAULT_SAFETY.cooldownMs),
   };
 }
@@ -94,6 +110,8 @@ export interface SafetyStatus {
   writesToday: number;
   nextReadAllowedMs: number;
   nextWriteAllowedMs: number;
+  /** Shopee API requests seen in the last rolling hour (see noteApiRequest). */
+  apiRequestsLastHour: number;
   /**
    * The budgets this gate actually enforces. Reported so `safety_status` shows
    * the user's configured limits instead of the hardcoded defaults it used to
@@ -103,6 +121,8 @@ export interface SafetyStatus {
     readMaxPerHour: number;
     writeMaxPerHour: number;
     writeMaxPerDay: number;
+    /** 0 means "report only" — the request count is shown but never enforced. */
+    apiRequestsMaxPerHour: number;
   };
 }
 
@@ -139,10 +159,15 @@ export function createSafetyGate(options: SafetyGateOptions = {}) {
   const lastOpAt: Record<OpKind, number> = { read: 0, write: 0 };
   let blockedUntil = 0;
   let consecutiveTimeouts = 0;
+  // Timestamps of every Shopee API request the browser made (not persisted —
+  // the durable budget is the op log above; this is traffic visibility plus an
+  // optional cap). Kept pruned to the last hour, so it stays small.
+  let apiRequests: number[] = [];
 
   function prune(): void {
     const cutoff = now() - 60 * 60_000;
     state.ops = state.ops.filter(([t]) => t >= cutoff);
+    apiRequests = apiRequests.filter((t) => t >= cutoff);
     const d = today(now());
     if (state.date !== d) {
       state.date = d;
@@ -185,9 +210,11 @@ export function createSafetyGate(options: SafetyGateOptions = {}) {
     return state.ops.filter(([, k]) => k === kind).length;
   }
 
-  function hourWindowEnd(): number {
-    const oldest = state.ops.length ? state.ops[0][0] : now();
-    return oldest + 60 * 60_000;
+  function hourWindowEnd(kind: OpKind): number {
+    // The oldest *of this kind* — the rolling hour frees up one slot at a time,
+    // so mixing kinds would report a reset time that frees nothing.
+    const oldest = state.ops.find(([, k]) => k === kind);
+    return (oldest ? oldest[0] : now()) + 60 * 60_000;
   }
 
   function dayEnd(): number {
@@ -196,8 +223,18 @@ export function createSafetyGate(options: SafetyGateOptions = {}) {
     return next.getTime();
   }
 
+  /**
+   * "14:05" in the machine's own timezone — the same clock the person reading
+   * the cooldown message is looking at. (`id-ID` was used here before, which
+   * only changed the digits' formatting, not the timezone, and made every
+   * message look Indonesia-specific on the other storefronts.)
+   */
   function fmtTime(ms: number): string {
-    return new Date(ms).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+    return new Date(ms).toLocaleTimeString('en-GB', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
   }
 
   return {
@@ -222,10 +259,20 @@ export function createSafetyGate(options: SafetyGateOptions = {}) {
       const used = countKind(kind);
       const maxPerHour = kind === 'read' ? cfg.readMaxPerHour : cfg.writeMaxPerHour;
       if (used >= maxPerHour) {
-        const retryAt = hourWindowEnd();
+        const retryAt = hourWindowEnd(kind);
         throw new RateLimitError(
           `📉 ${kind} budget spent: ${used}/${maxPerHour} ${kind} ops in the last hour. ` +
             `Next slot around ${fmtTime(retryAt)}.`,
+          retryAt,
+        );
+      }
+      // Optional traffic cap: op budgets say how many *operations* may run, this
+      // says how many requests they may collectively fire (see SafetyConfig).
+      if (cfg.apiRequestsMaxPerHour > 0 && apiRequests.length >= cfg.apiRequestsMaxPerHour) {
+        const retryAt = (apiRequests[0] ?? now()) + 60 * 60_000;
+        throw new RateLimitError(
+          `📉 Request budget spent: ${apiRequests.length}/${cfg.apiRequestsMaxPerHour} Shopee API ` +
+            `requests in the last hour. Next slot around ${fmtTime(retryAt)}.`,
           retryAt,
         );
       }
@@ -271,9 +318,22 @@ export function createSafetyGate(options: SafetyGateOptions = {}) {
       consecutiveTimeouts = 0;
     },
 
+    /**
+     * Record one Shopee API request the browser made. Called from the
+     * context-level response listener, so it costs nothing to instrument every
+     * endpoint. Never throws.
+     */
+    noteApiRequest(): void {
+      const t = now();
+      apiRequests.push(t);
+      // Cheap guard for a runaway page: keep only the rolling hour.
+      if (apiRequests.length > 2000) apiRequests = apiRequests.filter((x) => x >= t - 60 * 60_000);
+    },
+
     status(): SafetyStatus {
       prune();
       return {
+        apiRequestsLastHour: apiRequests.length,
         blockedUntilMs: blockedUntil > now() ? blockedUntil : null,
         readsLastHour: countKind('read'),
         writesLastHour: countKind('write'),
@@ -284,6 +344,7 @@ export function createSafetyGate(options: SafetyGateOptions = {}) {
           readMaxPerHour: cfg.readMaxPerHour,
           writeMaxPerHour: cfg.writeMaxPerHour,
           writeMaxPerDay: cfg.writeMaxPerDay,
+          apiRequestsMaxPerHour: cfg.apiRequestsMaxPerHour,
         },
       };
     },

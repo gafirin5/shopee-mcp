@@ -46,6 +46,7 @@ import {
 import { buildVariantRows } from '../src/tools/variants.js';
 import { starBreakdown, formatReview } from '../src/tools/reviews.js';
 import { createSafetyGate, RateLimitError, CooldownError } from '../src/utils/rate-limit.js';
+import { numericMatches } from '../src/seller/actions/product.js';
 import type { SearchItem, ItemBasic, PdpModel, PdpItem, Rating } from '../src/api/types.js';
 
 let failures = 0;
@@ -786,7 +787,53 @@ test('safety: status reports the configured budgets, not hardcoded defaults', as
   await gate.acquire('read');
   const s = gate.status();
   assert.equal(s.readsLastHour, 1);
-  assert.deepEqual(s.limits, { readMaxPerHour: 7, writeMaxPerHour: 3, writeMaxPerDay: 9 });
+  assert.deepEqual(s.limits, {
+    readMaxPerHour: 7,
+    writeMaxPerHour: 3,
+    writeMaxPerDay: 9,
+    apiRequestsMaxPerHour: 0, // unset env ⇒ report-only
+  });
+});
+
+test('numericMatches: accepts the value under either decimal convention', () => {
+  // Plain, IDR-grouped, and 2-decimal currencies all describe the same number.
+  assert.ok(numericMatches('150000', 150000));
+  assert.ok(numericMatches('150.000', 150000));
+  assert.ok(numericMatches('150.00', 150));
+  assert.ok(numericMatches('1,234', 1234));
+  assert.ok(numericMatches(' 42 ', 42));
+});
+
+test('numericMatches: rejects an empty, unchanged or different field', () => {
+  assert.equal(numericMatches('', 150000), false);
+  assert.equal(numericMatches('100000', 150000), false);
+  assert.equal(numericMatches('abc', 150000), false);
+  // A field still holding the previous price must not pass verification.
+  assert.equal(numericMatches('149.999', 150000), false);
+});
+
+test('safety: API requests are counted for the rolling hour only', async () => {
+  const { gate, advance } = makeGate();
+  for (let i = 0; i < 5; i++) gate.noteApiRequest();
+  assert.equal(gate.status().apiRequestsLastHour, 5);
+  advance(59 * 60_000);
+  assert.equal(gate.status().apiRequestsLastHour, 5);
+  advance(2 * 60_000); // past the hour
+  assert.equal(gate.status().apiRequestsLastHour, 0);
+});
+
+test('safety: request cap refuses the next op once the hour is full', async () => {
+  const { gate } = makeGate({ apiRequestsMaxPerHour: 3 });
+  for (let i = 0; i < 3; i++) gate.noteApiRequest();
+  await assert.rejects(() => gate.acquire('read'), RateLimitError);
+  assert.equal(gate.status().apiRequestsLastHour, 3);
+});
+
+test('safety: no cap configured means requests are reported, never enforced', async () => {
+  const { gate } = makeGate({ apiRequestsMaxPerHour: 0 });
+  for (let i = 0; i < 50; i++) gate.noteApiRequest();
+  await gate.acquire('read'); // must not throw
+  assert.equal(gate.status().apiRequestsLastHour, 50);
 });
 
 test('safety: reportSuccess resets the timeout streak', async () => {

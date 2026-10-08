@@ -3,8 +3,13 @@ import { isLoggedIn, DOMAIN, safetyStatus } from '../browser/session.js';
 import { withErrorHandling } from '../utils/errors.js';
 import { accountToolsSetting, setLoggedIn } from '../account-mode.js';
 
+/** "14:05" in the machine's local timezone — what the user's own clock shows. */
 function fmtTime(ms: number): string {
-  return new Date(ms).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+  return new Date(ms).toLocaleTimeString('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
 }
 
 export function registerStatusTools(server: McpServer): void {
@@ -50,6 +55,12 @@ export function registerStatusTools(server: McpServer): void {
           `   Reads last hour   : ${s.readsLastHour}/${s.limits.readMaxPerHour}`,
           `   Writes last hour  : ${s.writesLastHour}/${s.limits.writeMaxPerHour}`,
           `   Writes today      : ${s.writesToday}/${s.limits.writeMaxPerDay}`,
+          // One op is rarely one request (variant lookups click a dozen options),
+          // so this is the number that tracks traffic to Shopee. Capped only
+          // when SHOPEE_API_REQUESTS_MAX_PER_HOUR is set.
+          s.limits.apiRequestsMaxPerHour > 0
+            ? `   Shopee requests   : ${s.apiRequestsLastHour}/${s.limits.apiRequestsMaxPerHour} last hour`
+            : `   Shopee requests   : ${s.apiRequestsLastHour} last hour (no cap configured)`,
           `   Next read allowed : ${fmtTime(s.nextReadAllowedMs)}`,
           `   Next write allowed: ${fmtTime(s.nextWriteAllowedMs)}`,
           s.blockedUntilMs

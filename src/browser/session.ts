@@ -79,6 +79,16 @@ function debug(msg: string): void {
 // instead we navigate to the relevant page and intercept the response Shopee's
 // app fires (see captureJson).
 
+// Account-safety gate: spacing, budgets, the anti-bot circuit breaker, and the
+// request counter for EVERY browser operation (see src/utils/rate-limit.ts).
+// One account + one IP means behaviour is the ban trigger — so all traffic
+// funnels through here. Declared before createContext so the context-level
+// response listener below can feed it.
+const safety = createSafetyGate();
+
+/** Shopee API paths — /api/v4/pdp/get_pc, /api/v2/item/get_ratings, … */
+const SHOPEE_API_RE = /\/api\/v\d+\//;
+
 let contextPromise: Promise<BrowserContext> | null = null;
 
 async function createContext(headless: boolean): Promise<BrowserContext> {
@@ -96,6 +106,23 @@ async function createContext(headless: boolean): Promise<BrowserContext> {
     humanize: true,
     args: ['--no-sandbox', '--disable-dev-shm-usage'],
   })) as unknown as BrowserContext;
+
+  // Count every Shopee API request the browser makes, at the context level so
+  // it covers every page and every code path (captures, UI clicks, portal
+  // fetches). One "op" is rarely one request — this is the number that reflects
+  // actual traffic to Shopee, and it is what safety_status reports.
+  //
+  // Guarded rather than assumed: CloakBrowser hands back its own context
+  // wrapper, and a missing event emitter must degrade to "no request counter",
+  // never to a browser that cannot start.
+  if (typeof ctx.on === 'function') {
+    ctx.on('response', (resp: Response) => {
+      if (SHOPEE_API_RE.test(resp.url())) safety.noteApiRequest();
+    });
+  } else {
+    debug('Context does not expose events — Shopee API requests will not be counted');
+  }
+
   return ctx;
 }
 
@@ -154,11 +181,6 @@ function withLock<T>(fn: () => Promise<T>): Promise<T> {
   lock = run.catch(() => {});
   return run;
 }
-
-// Account-safety gate: spacing, budgets, and the anti-bot circuit breaker for
-// EVERY browser operation (see src/utils/rate-limit.ts). One account + one IP
-// means behaviour is the ban trigger — so all traffic funnels through here.
-const safety = createSafetyGate();
 
 /**
  * Serialize a callback against all other browser traffic, gated by the
