@@ -174,6 +174,8 @@ interface BuyerState {
   /** Shopee rejects every cart/update call. */
   cartUpdateError: boolean;
   calls: Array<{ path: string; body: Record<string, unknown> }>;
+  /** Storefront pages the browser asked for (not API calls). */
+  pageViews: string[];
 }
 
 // Prices are Shopee's amount × 100000.
@@ -322,6 +324,7 @@ const PRISTINE: BuyerState = {
   ],
   cartUpdateError: false,
   calls: [],
+  pageViews: [],
 };
 
 let buyer: BuyerState = structuredClone(PRISTINE);
@@ -666,6 +669,7 @@ async function routeBuyer(route: Route, req: Request): Promise<void> {
     buyer.calls.push({ path: p, body });
     return apiReply(route, p, url, body);
   }
+  buyer.pageViews.push(p);
   const pdp = /^\/product\/(\d+)\/(\d+)$/.exec(p);
   if (pdp && buyer.products[pdp[2]]) return reply(route, 200, productPage(pdp[2], pdp[1]));
   const shopMatch = /^\/shop\/(\d+)$/.exec(p);
@@ -1092,6 +1096,38 @@ check('update cart: without confirm it previews and changes nothing', async () =
   assert.match(out, /WRITE PREVIEW/);
   assert.equal(callsTo('/api/v4/cart/update'), 0);
 });
+
+// The Shopee Video post takes a path from the caller, so it has to check the file first.
+
+check(
+  'post_shopee_video: refuses a file that is not a video before the browser is used',
+  async () => {
+    const notVideo = path.join(HOME, 'notes.txt');
+    await fs.writeFile(notVideo, 'not a video');
+    const out = await callTool('post_shopee_video', {
+      video_path: notVideo,
+      caption: 'Cek ini',
+      confirm: true,
+    });
+    assert.match(out, /Unsupported video extension/);
+    assert.deepEqual(buyer.pageViews, [], 'no Shopee page should be opened for a refused file');
+  },
+);
+
+check(
+  'post_shopee_video: a video file passes the check and reaches the Shopee Video pages',
+  async () => {
+    const clip = path.join(HOME, 'clip.mp4');
+    await fs.writeFile(clip, Buffer.alloc(2048));
+    const out = await callTool('post_shopee_video', {
+      video_path: clip,
+      caption: 'Cek ini',
+      confirm: true,
+    });
+    assert.match(out, /not available on the web right now/);
+    assert.ok(buyer.pageViews.length > 0, 'the video pages should have been opened');
+  },
+);
 
 // A probe only reads the storefront, so it must not be metered or audited as a write.
 

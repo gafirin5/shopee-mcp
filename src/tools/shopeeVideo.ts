@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { BASE_URL } from '../browser/session.js';
 import { withBuyerAction, withBuyerRead, stepDelay } from '../actions/base.js';
+import { validateVideoFile } from '../utils/video-file.js';
 import { withErrorHandling } from '../utils/errors.js';
 import { confirmGate } from '../utils/confirm.js';
 
@@ -84,6 +85,8 @@ export function registerShopeeVideoTools(server: McpServer): void {
           `Post video \`${video_path}\` to the Shopee Video feed with caption:\n\n> ${caption}`,
         );
         if (gate) return gate;
+        // Same check as upload_product_video, before the browser is touched.
+        await validateVideoFile(video_path);
         const text = await withBuyerAction(
           'post-shopee-video',
           async (page) => {
