@@ -6,6 +6,7 @@ import {
   openProductEdit,
   findVideoInput,
   waitForVideoReady,
+  waitForVideoOnReload,
   saveProduct,
 } from '../pages/productEdit.js';
 
@@ -85,16 +86,27 @@ export async function uploadProductVideo(args: UploadVideoArgs): Promise<string>
       steps.push('✅ Video preview rendered (upload + processing done)');
       await stepDelay();
 
-      // 5. Save.
+      // 5. Save, then reload the editor and look for the video. A success toast alone is
+      // not proof: the page can toast without storing the video.
       if (!args.skipSave) {
         const { toastSeen } = await saveProduct(page);
-        if (!toastSeen) {
+        await openProductEdit(page, itemId);
+        const onReload = await waitForVideoOnReload(page, true, 20000);
+        if (onReload !== 'confirmed') {
           throw new ActionError(
-            'Save was clicked but no success toast appeared. Verify manually on the edit page ' +
-              'before assuming the video is attached.',
+            onReload === 'unknown'
+              ? 'Save was clicked, but the edit page did not render after reloading, so the video ' +
+                  'could not be checked. Verify manually on the edit page.'
+              : 'Save was clicked, but the reloaded edit page shows no video. Verify manually on the ' +
+                  'edit page before assuming the video is attached.',
           );
         }
-        steps.push('✅ Saved — success toast shown');
+        steps.push(
+          toastSeen
+            ? '✅ Saved — success toast shown'
+            : '✅ Saved — no success toast, but the reloaded page shows the video',
+        );
+        steps.push('✅ Confirmed on a fresh load: video present');
       } else {
         steps.push('⏭️ skipSave=true — product not saved');
       }
@@ -139,9 +151,22 @@ export async function removeProductVideo(args: RemoveVideoArgs): Promise<string>
       await stepDelay();
 
       const { toastSeen } = await saveProduct(page);
+      // Reload and check the video is gone. The toast is not proof, and a control that
+      // deletes nothing still lets Save go through.
+      await openProductEdit(page, itemId);
+      const onReload = await waitForVideoOnReload(page, false, 20000);
+      if (onReload !== 'confirmed') {
+        throw new ActionError(
+          onReload === 'unknown'
+            ? `Save was clicked, but the edit page did not render after reloading, so the removal ` +
+                `from product ${itemId} could not be checked. Verify manually.`
+            : `Video is still attached to product ${itemId} after saving — nothing was removed. ` +
+                'The delete control may have drifted; check the debug screenshot.',
+        );
+      }
       return toastSeen
         ? `🗑️ Video deleted and product ${itemId} saved.`
-        : `🗑️ Video delete clicked on product ${itemId}, but no save toast appeared — verify manually.`;
+        : `🗑️ Video deleted and product ${itemId} saved. No success toast appeared, but the reloaded page shows no video.`;
     },
     `item ${itemId} remove video`,
   );

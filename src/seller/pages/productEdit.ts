@@ -22,6 +22,8 @@ export const SEL = {
   addVideoTile: '[class*="video" i] [class*="add" i], [data-testid*="video" i] [class*="add" i]',
   /** A rendered video preview (uploaded state) inside the media section. */
   videoPreview: 'video, [class*="video" i] source, [class*="video" i] [class*="thumb" i] img',
+  /** A progress bar still moving inside the video area: the upload or transcode is not finished. */
+  videoProgress: '[class*="video" i] [role="progressbar"]',
   /** Upload progress percent text. */
   progressText: 'text=/100\\s*%|selesai|complete/i',
   /** Save button candidates (id-ID "Simpan"; en/zh fallbacks). Substring match only: the label is checked exactly in findSaveButton. */
@@ -45,24 +47,27 @@ export async function openProductEdit(page: Page, itemId: string): Promise<void>
   await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
 }
 
-function videoInputCandidates(page: Page): Locator[] {
-  return [
-    page.locator(SEL.videoFileInput),
-    page.locator(SEL.videoInputNearVideoContainer),
-    page.locator(SEL.anyFileInput),
-  ];
-}
+/**
+ * Accept types that name a video format. A fallback input has to declare one: the media
+ * section also holds image uploaders, and a video sent to one of those is a misdirected
+ * write.
+ */
+const VIDEO_ACCEPT = /video|\.mp4|\.mov|\.m4v/i;
 
 /**
- * Locate the video file input. Returns the first visible-or-attached candidate;
- * throws a selector-diagnostic error if none exist (e.g. we're on the wrong page).
+ * Locate the video file input. The specific selector comes first. The fallbacks match
+ * looser selectors, so they count only when their input declares a video type. Throws a
+ * selector-diagnostic error if none exist (e.g. we're on the wrong page).
  */
 export async function findVideoInput(page: Page): Promise<Locator> {
-  for (const loc of videoInputCandidates(page)) {
-    try {
-      if (await loc.first().count()) return loc.first();
-    } catch {
-      // invalid selector on this DOM — try the next candidate
+  const specific = page.locator(SEL.videoFileInput).first();
+  if ((await specific.count().catch(() => 0)) > 0) return specific;
+  for (const selector of [SEL.videoInputNearVideoContainer, SEL.anyFileInput]) {
+    const inputs = page.locator(selector);
+    const n = await inputs.count().catch(() => 0);
+    for (let i = 0; i < n; i++) {
+      const accept = (await inputs.nth(i).getAttribute('accept')) ?? '';
+      if (VIDEO_ACCEPT.test(accept)) return inputs.nth(i);
     }
   }
   throw new Error(
@@ -72,20 +77,68 @@ export async function findVideoInput(page: Page): Promise<Locator> {
   );
 }
 
+/** Whether the page shows a video preview. */
+async function hasVideoPreview(page: Page): Promise<boolean> {
+  return (await page.locator(SEL.videoPreview).count()) > 0;
+}
+
+/** Whether an upload or transcode is still moving in the video area. */
+async function videoStillProcessing(page: Page): Promise<boolean> {
+  const bars = page.locator(SEL.videoProgress);
+  const n = await bars.count();
+  for (let i = 0; i < n; i++) {
+    const bar = bars.nth(i);
+    if (!(await bar.isVisible().catch(() => false))) continue;
+    const value = await bar.getAttribute('aria-valuenow');
+    const text = ((await bar.innerText().catch(() => '')) || '').trim();
+    if (value !== '100' && !/^100\s*%$/.test(text)) return true;
+  }
+  return false;
+}
+
 /**
- * Wait until the uploaded video is rendered (preview node present) and the
- * progress indicator is gone or reads complete. Video transcoding on Shopee's
- * side can take a while — timeoutMs covers the whole upload+process window.
+ * Wait until the uploaded video is rendered and no progress bar is still moving.
+ *
+ * A preview can render before processing ends, so the preview alone is not enough.
+ * Video transcoding on Shopee's side can take a while — timeoutMs covers the whole
+ * upload+process window.
  */
 export async function waitForVideoReady(page: Page, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const preview = page.locator(SEL.videoPreview);
-    const hasPreview = (await preview.count()) > 0;
-    if (hasPreview) return true;
+    if ((await hasVideoPreview(page)) && !(await videoStillProcessing(page))) return true;
     await page.waitForTimeout(2000);
   }
   return false;
+}
+
+/** What a freshly loaded edit page shows about the video. */
+export type VideoOnReload = 'confirmed' | 'contradicted' | 'unknown';
+
+/**
+ * On a freshly loaded edit page, wait until the video preview is present (`wantPresent`)
+ * or absent. After Save, the reloaded page is the evidence, not the toast. Returns
+ * 'unknown' when the editor never rendered: a blank page would otherwise look like
+ * "no video".
+ */
+export async function waitForVideoOnReload(
+  page: Page,
+  wantPresent: boolean,
+  timeoutMs: number,
+): Promise<VideoOnReload> {
+  const rendered = await page
+    .locator(SEL.saveButton)
+    .first()
+    .waitFor({ state: 'attached', timeout: 15000 })
+    .then(() => true)
+    .catch(() => false);
+  if (!rendered) return 'unknown';
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if ((await hasVideoPreview(page)) === wantPresent) return 'confirmed';
+    if (Date.now() >= deadline) return 'contradicted';
+    await page.waitForTimeout(1000);
+  }
 }
 
 /**
