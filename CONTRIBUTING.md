@@ -4,7 +4,7 @@ Thanks for helping improve this MCP server.
 
 ## Prerequisites
 
-- [Node.js](https://nodejs.org/) **18+** (see `engines` in `package.json`)
+- [Node.js](https://nodejs.org/) **20+** (see `engines` in `package.json`; 18 is past end-of-life and untested)
 - Git
 - A display (or `xvfb`) — the server drives a **headed** browser.
 

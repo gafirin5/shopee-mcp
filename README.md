@@ -75,7 +75,7 @@ Reads of **your own** buyer account, plus the only tools anywhere in this server
 | `get_cart`                              | Your cart grouped by shop — items, variants, quantities, prices, model IDs.                                                         |
 | `add_to_cart` / `update_cart_item`      | Add a product (exact variant via `modelId`) in a quantity of 1-20; change a line's quantity, or remove it with `quantity: 0`.       |
 | `like_product` / `follow_shop`          | Like/unlike a product; follow/unfollow a shop.                                                                                      |
-| `claim_shop_voucher`                    | Claim one of a shop's vouchers into your wallet (a claim can't be undone).                                                          |
+| `claim_shop_voucher`                    | Claim one of a shop's vouchers into your wallet — requires `confirm: true` (a claim can't be undone).                               |
 
 ### Write actions — gated
 
@@ -98,7 +98,7 @@ Every failing write saves a screenshot to `~/.shopee-mcp/debug/` so UI drift is 
 
 ## Requirements
 
-- **Node.js ≥ 18**
+- **Node.js ≥ 20** (CI runs 20, 22 and 24)
 - **A display** — the browser runs _headed_ (Shopee detects headless). On a server, wrap commands in `xvfb-run`.
 - **A Shopee account that is yours.** Automation violates Shopee's ToS; only point this at an account you own, at low volume.
 
@@ -190,9 +190,9 @@ Ask your MCP client things like:
 Every browser operation — read or write — passes through one account-safety gate (`src/utils/rate-limit.ts`), because all traffic comes from **one account + one IP**, and behaviour is what gets accounts flagged:
 
 1. **Jittered spacing** — reads wait 3–6 s between operations, writes 1–3 min. Never a fixed rhythm.
-2. **Budgets** — max 30 reads/hour, 10 writes/hour, 30 writes/day (persisted in `~/.shopee-mcp/usage.json`, surviving restarts). Exceeding a budget fails fast with the reset time instead of hammering.
+2. **Budgets** — max 30 reads/hour, 10 writes/hour, 30 writes/day (persisted in `~/.shopee-mcp/usage.json`, surviving restarts). Exceeding a budget fails fast with the reset time instead of hammering. Operator budgets count _operations_; the browser also tallies every Shopee API request and `safety_status` reports the rolling-hour total, cap it with `SHOPEE_API_REQUESTS_MAX_PER_HOUR` if you want a traffic ceiling too.
 3. **Anti-bot circuit breaker** — an anti-bot block (`90309999`), an auth-required error, or two consecutive timeouts cools the whole server down for 10 minutes. Tools fail fast during cooldown with the unlock time; don't force retries.
-4. **Two-step confirmation** — every Seller Centre write tool (price/stock edits, list/unlist, video upload & removal, chat replies) and `post_shopee_video` returns a **preview** unless called with `confirm: true`, so an AI client can never modify your shop uninvited. The experimental account actions (`add_to_cart`, `update_cart_item`, `like_product`, `follow_shop`, `claim_shop_voucher`) act directly, but stay hidden until you are logged in, are rate-limited and audited like every other write, and never check out or pay.
+4. **Two-step confirmation** — every Seller Centre write tool (price/stock edits, list/unlist, video upload & removal, chat replies) and `post_shopee_video` returns a **preview** unless called with `confirm: true`, so an AI client can never modify your shop uninvited. `claim_shop_voucher` is gated the same way (a claim cannot be undone); the remaining experimental account actions (`add_to_cart`, `update_cart_item`, `like_product`, `follow_shop`) act directly, but stay hidden until you are logged in, are rate-limited and audited like every other write, and never check out or pay.
 5. **Seller-write switch** — all seller-side writes stay disabled until `SHOPEE_ENABLE_SELLER_WRITES=true` in `.env`.
 6. **Audit trail** — every write (success or failure) and every block is appended to `~/.shopee-mcp/audit.log` (JSONL).
 7. **Introspection** — the `safety_status` tool shows budgets used, next allowed slots, and cooldown state.
@@ -203,25 +203,27 @@ Every browser operation — read or write — passes through one account-safety 
 
 All optional — copy `.env.example` to `.env` to override. Full explanations: [docs/CONFIGURATION.md](./docs/CONFIGURATION.md).
 
-| Variable                                | Default                        | Purpose                                                         |
-| --------------------------------------- | ------------------------------ | --------------------------------------------------------------- |
-| `SHOPEE_DOMAIN`                         | `shopee.co.id`                 | Regional Shopee domain (`.co.id`, `.com.my`, `.sg`, `.tw`).     |
-| `SHOPEE_LOCALE` / `SHOPEE_TIMEZONE`     | _derived from domain_          | Browser locale / timezone override.                             |
-| `SHOPEE_PROFILE_DIR`                    | `~/.shopee-mcp/chrome-profile` | Where the saved login lives (both realms share it — SSO).       |
-| `SHOPEE_HEADLESS`                       | `false`                        | Keep `false` — headless is detected.                            |
-| `SHOPEE_ACCOUNT_TOOLS`                  | `auto`                         | `auto`: account tools while logged in; `off`: always read-only. |
-| `CACHE_TTL_MS`                          | `30000`                        | In-memory cache lifetime.                                       |
-| `SHOPEE_ENABLE_SELLER_WRITES`           | `false`                        | Master switch for all seller-side write tools.                  |
-| `SHOPEE_READ_SPACING_MS` (+ `_SPREAD`)  | `3000` (+ `3000`)              | Jittered delay between reads.                                   |
-| `SHOPEE_WRITE_SPACING_MS` (+ `_SPREAD`) | `60000` (+ `120000`)           | Jittered delay between writes.                                  |
-| `SHOPEE_READ_MAX_PER_HOUR`              | `30`                           | Read budget per hour.                                           |
-| `SHOPEE_WRITE_MAX_PER_HOUR`             | `10`                           | Write budget per hour.                                          |
-| `SHOPEE_WRITE_MAX_PER_DAY`              | `30`                           | Write budget per day.                                           |
-| `SHOPEE_COOLDOWN_MS`                    | `600000`                       | Anti-bot circuit-breaker cooldown (10 min).                     |
-| `SHOPEE_ACTION_TIMEOUT_MS`              | `60000`                        | UI write-action timeout (uploads, edits).                       |
-| `SHOPEE_ACTION_DELAY_MS`                | `2000`                         | Politeness delay between UI steps.                              |
-| `SHOPEE_VIDEO_MAX_MB`                   | `200`                          | Upload guard — reject larger video files before the portal.     |
-| `DEBUG`                                 | `false`                        | Log startup/debug info to stderr.                               |
+| Variable                                | Default                        | Purpose                                                                         |
+| --------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------- |
+| `SHOPEE_DOMAIN`                         | `shopee.co.id`                 | Regional Shopee domain (`.co.id`, `.com.my`, `.sg`, `.tw`).                     |
+| `SHOPEE_LOCALE` / `SHOPEE_TIMEZONE`     | _derived from domain_          | Browser locale / timezone override.                                             |
+| `SHOPEE_PROFILE_DIR`                    | `~/.shopee-mcp/chrome-profile` | Where the saved login lives (both realms share it — SSO).                       |
+| `SHOPEE_HEADLESS`                       | `false`                        | Keep `false` — headless is detected.                                            |
+| `SHOPEE_ACCOUNT_TOOLS`                  | `auto`                         | `auto`: account tools while logged in; `off`: always read-only.                 |
+| `CACHE_TTL_MS`                          | `30000`                        | In-memory cache lifetime.                                                       |
+| `SHOPEE_ENABLE_SELLER_WRITES`           | `false`                        | Master switch for all seller-side write tools.                                  |
+| `SHOPEE_READ_SPACING_MS` (+ `_SPREAD`)  | `3000` (+ `3000`)              | Jittered delay between reads.                                                   |
+| `SHOPEE_WRITE_SPACING_MS` (+ `_SPREAD`) | `60000` (+ `120000`)           | Jittered delay between writes.                                                  |
+| `SHOPEE_READ_MAX_PER_HOUR`              | `30`                           | Read budget per hour.                                                           |
+| `SHOPEE_WRITE_MAX_PER_HOUR`             | `10`                           | Write budget per hour.                                                          |
+| `SHOPEE_WRITE_MAX_PER_DAY`              | `30`                           | Write budget per day.                                                           |
+| `SHOPEE_COOLDOWN_MS`                    | `600000`                       | Anti-bot circuit-breaker cooldown (10 min).                                     |
+| `SHOPEE_API_REQUESTS_MAX_PER_HOUR`      | `0` (report only)              | Cap on Shopee API requests per rolling hour; `safety_status` reports the count. |
+| `SHOPEE_API_REQUESTS_MAX_PER_HOUR`      | `0` (report only)              | Cap on Shopee API requests per hour; `safety_status` always reports the count.  |
+| `SHOPEE_ACTION_TIMEOUT_MS`              | `60000`                        | UI write-action timeout (uploads, edits).                                       |
+| `SHOPEE_ACTION_DELAY_MS`                | `2000`                         | Politeness delay between UI steps.                                              |
+| `SHOPEE_VIDEO_MAX_MB`                   | `200`                          | Upload guard — reject larger video files before the portal.                     |
+| `DEBUG`                                 | `false`                        | Log startup/debug info to stderr.                                               |
 
 ## Why a browser?
 

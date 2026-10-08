@@ -14,6 +14,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Ver
 - **Buyer extras**: `get_shop_products`, `search_shops`, video info in `get_product_detail`, `check_product_video`, `shopee_video_probe`, `compare_prices`.
 - `test/tools.ts` (`npm run test:tools`): offline registry test that builds the real server and lists its tools; wired into CI.
 
+### Changed
+
+- **Seller price/stock edits can no longer silently touch the wrong row.** `update_price` and `update_stock` now refuse to edit a variation listing unless `variation_index` says which row (they previously edited the first one), verify the typed value before Save, and re-read the edit page afterwards to report whether Shopee really stored it. A redirect to a different product aborts the action.
+- **`claim_shop_voucher` requires `confirm: true`** — a claim cannot be undone, so it now uses the same preview-then-execute gate as the Seller Centre writes.
+- **The safety gate counts requests, not just operations.** Every `/api/vN/…` response the browser makes is tallied; `safety_status` reports the rolling-hour total, and `SHOPEE_API_REQUESTS_MAX_PER_HOUR` (unset by default) turns that into a real cap — one operation can be a dozen requests.
+- Seller tool output and cooldown/next-slot times are English and use the machine's local 24-hour clock, instead of Indonesian labels and `id-ID` formatting on every storefront.
+- `engines.node` is now `>=20` (18 is past end-of-life and was never exercised by CI, which tests 20/22/24).
+
 ### Fixed
 
 - **The server failed to start** with `Fatal error: Error: Tool get_product_reviews is already registered` — the tool was registered twice (an older copy in `research.ts` alongside the real one in `reviews.ts`) and `server.tool()` throws on a duplicate name. The duplicate is gone and `npm run test:tools` now fails CI if it ever returns.

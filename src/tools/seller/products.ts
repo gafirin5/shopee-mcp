@@ -48,7 +48,10 @@ export function registerSellerProductTools(server: McpServer): void {
             content: [
               {
                 type: 'text',
-                text: '🛍️ Seller Products (page 1)\n\nToko belum punya produk (total=0). Tambahkan produk lewat /portal/product/new, lalu coba lagi.',
+                text:
+                  '🛍️ Seller Products (page 1)\n\n' +
+                  'This shop has no products yet (total=0). Add one in Seller Centre ' +
+                  '(/portal/product/new) and try again.',
               },
             ],
           };

@@ -36,12 +36,12 @@ export function registerSellerShopTools(server: McpServer): void {
           const lines = [
             '🏪 Seller Shop Info',
             '',
-            `   Nama toko   : ${name}`,
+            `   Shop name   : ${name}`,
             `   Shop ID     : ${String(data.shop_id ?? '?')}`,
             `   Region      : ${String(data.shop_region ?? '?')}`,
             flag('Official Shop (Mall)', data.official_shop),
             flag('Toko Mart', data.is_mart_shop),
-            flag('SIP aktif', data.is_sip_primary || data.is_sip_affiliated),
+            flag('SIP active', data.is_sip_primary || data.is_sip_affiliated),
           ];
           return { content: [{ type: 'text', text: lines.join('\n') }] };
         }
