@@ -26,9 +26,9 @@ These drive the real Seller Centre write code (session, CloakBrowser, Playwright
 CLOAKBROWSER_BINARY_PATH=/path/to/chromium npm run test:browser
 ```
 
-Without the variable the script prints `SKIPPED` and exits 0, so CI is unaffected. CloakBrowser's own Chromium download is often blocked on restricted networks; any Chromium that Playwright can launch will do.
+Without the variable the script prints `SKIPPED` and exits 0, so CI is unaffected. CloakBrowser's own Chromium download is often blocked on restricted networks; any Chromium that Playwright can launch will do. CloakBrowser is kept on 0.5.x: its 0.6.0 release failed 19 of the 20 browser checks in the test environment, which runs a non-bundled Chromium 153, and it has not been evaluated with its own binary.
 
-What it shows: the control flow and the guards (refusals, redirect abort, unverified saves, listing toggles, dialog confirmation, audit entries, request counting). The list checks were also confirmed by re-introducing the old bugs by hand: each one fails, as it should. That check is manual, not part of the script.
+What it shows: the control flow and the guards (refusals, redirect abort, unverified saves, the exact Save label next to a look-alike draft button, saves that show no toast, listing toggles, dialog confirmation, audit entries, account-write metering, request counting). The list checks were also confirmed by re-introducing the old bugs by hand: each one fails, as it should. That check is manual, not part of the script.
 
 What it cannot show: that the fixture matches Shopee's current DOM. The selectors in `src/seller/pages/` are still unverified against the live portal, so the last check before relying on them is one look at the edit and list pages in a logged-in browser.
 

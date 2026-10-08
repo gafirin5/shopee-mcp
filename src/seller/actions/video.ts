@@ -87,8 +87,8 @@ export async function uploadProductVideo(args: UploadVideoArgs): Promise<string>
 
       // 5. Save.
       if (!args.skipSave) {
-        const saved = await saveProduct(page);
-        if (!saved) {
+        const { toastSeen } = await saveProduct(page);
+        if (!toastSeen) {
           throw new ActionError(
             'Save was clicked but no success toast appeared. Verify manually on the edit page ' +
               'before assuming the video is attached.',
@@ -138,8 +138,8 @@ export async function removeProductVideo(args: RemoveVideoArgs): Promise<string>
       await preview.click();
       await stepDelay();
 
-      const saved = await saveProduct(page);
-      return saved
+      const { toastSeen } = await saveProduct(page);
+      return toastSeen
         ? `🗑️ Video deleted and product ${itemId} saved.`
         : `🗑️ Video delete clicked on product ${itemId}, but no save toast appeared — verify manually.`;
     },

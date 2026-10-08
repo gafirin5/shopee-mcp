@@ -24,7 +24,7 @@ export const SEL = {
   videoPreview: 'video, [class*="video" i] source, [class*="video" i] [class*="thumb" i] img',
   /** Upload progress percent text. */
   progressText: 'text=/100\\s*%|selesai|complete/i',
-  /** Save button (id-ID portal: "Simpan"; fallbacks for en/zh). */
+  /** Save button candidates (id-ID "Simpan"; en/zh fallbacks). Substring match only: the label is checked exactly in findSaveButton. */
   saveButton: 'button:has-text("Simpan"), button:has-text("Save"), button:has-text("保存")',
   /** Success toast after saving. */
   successToast: 'text=/berhasil|success|saved|tersimpan|更新成功/i',
@@ -88,17 +88,59 @@ export async function waitForVideoReady(page: Page, timeoutMs: number): Promise<
   return false;
 }
 
-/** Click the portal Save button and wait for a success toast. */
-export async function saveProduct(page: Page): Promise<boolean> {
-  const save = page.locator(SEL.saveButton).first();
-  await save.waitFor({ state: 'visible', timeout: ACTION_TIMEOUT_MS });
-  await save.click();
-  try {
-    await page.locator(SEL.successToast).first().waitFor({ state: 'visible', timeout: 15000 });
-    return true;
-  } catch {
-    return false;
+/**
+ * The Save button's exact label, compared after trimming and lower-casing.
+ *
+ * SEL.saveButton is a substring match, and that is not enough on its own:
+ * "Simpan Draf" (save as draft) contains "Simpan" and can come first in the DOM,
+ * so `.first()` on the selector presses the draft button. When the portal
+ * renames Save, change this list rather than loosening the selector.
+ */
+const SAVE_LABELS = ['simpan', 'save', '保存'];
+
+/** The visible button whose exact label is a save label, polling until timeoutMs. */
+async function findSaveButton(page: Page, timeoutMs: number): Promise<Locator | undefined> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const candidates = page.locator(SEL.saveButton);
+    const n = await candidates.count();
+    for (let i = 0; i < n; i++) {
+      const button = candidates.nth(i);
+      if (!(await button.isVisible().catch(() => false))) continue;
+      const label = (await button.innerText().catch(() => ''))
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+      if (SAVE_LABELS.includes(label)) return button;
+    }
+    if (Date.now() >= deadline) return undefined;
+    await page.waitForTimeout(250);
   }
+}
+
+/**
+ * Click the portal's Save button and report whether a success toast appeared.
+ *
+ * The toast is a hint, not proof: its text match is page-wide, so an unrelated
+ * "berhasil" can show, and a save that worked can show nothing. Callers that
+ * need certainty re-read the saved value from a freshly loaded page.
+ */
+export async function saveProduct(page: Page): Promise<{ toastSeen: boolean }> {
+  const save = await findSaveButton(page, ACTION_TIMEOUT_MS);
+  if (!save) {
+    throw new Error(
+      'No Save button labelled "Simpan" or "Save" is visible on the edit page, so nothing was saved. ' +
+        'The portal may have renamed it; check the debug screenshot.',
+    );
+  }
+  await save.click();
+  const toastSeen = await page
+    .locator(SEL.successToast)
+    .first()
+    .waitFor({ state: 'visible', timeout: 15000 })
+    .then(() => true)
+    .catch(() => false);
+  return { toastSeen };
 }
 
 /**

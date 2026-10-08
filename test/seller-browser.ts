@@ -2,13 +2,13 @@
  * Browser tests for the Seller Centre write actions, run against a local fixture
  * of the portal instead of the live site.
  *
- *  - Nothing leaves the machine: requests to any host other than the fixture are
+ *  - Nothing leaves the machine: requests to any host other than the fixtures are
  *    aborted, and everything the server writes (profile, budgets, audit log,
  *    debug screenshots) goes under a throwaway HOME.
- *  - It drives the real code path — session.ts → CloakBrowser → Playwright — so
- *    the selectors, the typed-value check, Save, and the fresh-load re-read all
- *    run for real. What it cannot show is that the fixture matches Shopee's
- *    current DOM; that still needs one look at the live edit page.
+ *  - It drives the real code path (session.ts → CloakBrowser → Playwright), so the
+ *    selectors, the typed-value check, Save, and the fresh-load re-read all run for
+ *    real. What it cannot show is that the fixture matches Shopee's current DOM;
+ *    that still needs one look at the live edit page.
  *
  * Needs a Chromium binary the CloakBrowser wrapper can launch:
  *
@@ -49,12 +49,14 @@ Object.assign(process.env, {
   SHOPEE_WRITE_MAX_PER_DAY: '1000',
 });
 
-const { getContext, getSellerPage, safetyStatus, closeContext } =
+const { getContext, getSellerPage, safetyStatus, closeContext, captureAll, captureAccountWrite } =
   await import('../src/browser/session.js');
 const { updateProductPrice, updateProductStock, setItemListing } =
   await import('../src/seller/actions/product.js');
 
 const FIXTURE_HOST = 'seller.shopee.test';
+const BUYER_HOST = 'shopee.test';
+const BUYER_BASE = `https://${BUYER_HOST}`;
 const fmt = (n: number): string => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 
 // ─── Fixture portal ───────────────────────────────────────────────────────────
@@ -68,12 +70,16 @@ interface Listing {
   classOnlySwitch?: boolean;
   /** A role=switch button inside a wrapper whose class also contains "switch". */
   wrappedSwitch?: boolean;
-  /** The editor URL redirects to another product's editor. */
+  /** The editor URL changes to another product's editor before the page settles. */
   redirectTo?: string;
   /** Save shows the success toast but stores nothing. */
   saveDrops?: boolean;
   /** Stock inputs revert any value above this, like a portal with a hard cap. */
   stockMax?: number;
+  /** Save stores the value but never shows a success toast. */
+  noToast?: boolean;
+  /** The edit page has a "Simpan Draf" button and no exact "Simpan" button. */
+  onlyDraftSave?: boolean;
 }
 
 const PRISTINE: Record<string, Listing> = {
@@ -81,7 +87,9 @@ const PRISTINE: Record<string, Listing> = {
   '2002': { name: 'Running shoes', price: [100000, 120000], stock: [3, 4], listed: true },
   '3003': { name: 'Backpack', price: [80000], stock: [1], listed: true, redirectTo: '9999' },
   '4004': { name: 'Cap', price: [90000], stock: [2], listed: true, saveDrops: true },
+  '4141': { name: 'Socks', price: [25000], stock: [10], listed: true, onlyDraftSave: true },
   '5005': { name: 'Hoodie', price: [70000], stock: [5], listed: true, classOnlySwitch: true },
+  '6006': { name: 'Sandals', price: [45000], stock: [4], listed: true, noToast: true },
   // Listed in DOM order before 777 on purpose: a substring match on "777" hits this row first.
   '7777': { name: 'Coffee cup', price: [61000], stock: [8], listed: false },
   '777': { name: 'Ceramic mug', price: [60000], stock: [6], listed: false },
@@ -94,6 +102,7 @@ const portal = {
   saves: [] as string[],
   toggles: [] as string[],
   decoyClicks: 0,
+  draftClicks: 0,
 };
 
 function resetPortal(): void {
@@ -101,6 +110,7 @@ function resetPortal(): void {
   portal.saves = [];
   portal.toggles = [];
   portal.decoyClicks = 0;
+  portal.draftClicks = 0;
 }
 
 const LIST_SCRIPT = String.raw`
@@ -141,15 +151,16 @@ document.querySelectorAll('input').forEach((inp) => {
   });
 });
 const read = (kind) => [...document.querySelectorAll('input[data-kind="' + kind + '"]')].map((i) => Number(digits(i.value)));
-document.getElementById('save-btn').addEventListener('click', async () => {
+const saveBtn = document.getElementById('save-btn');
+if (saveBtn) saveBtn.addEventListener('click', async () => {
   await fetch('/__save', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: PID, price: read('price'), stock: read('stock') }) });
-  document.getElementById('toast').style.display = 'block';
+  if (!document.body.dataset.noToast) document.getElementById('toast').style.display = 'block';
 });
 `;
 
 function listPage(): string {
-  // Longer ids first: "7777" is listed above "777", so a substring match hits the wrong row first.
   const rows = Object.entries(portal.products)
+    // Longer ids first: "7777" is listed above "777", so a substring match hits the wrong row first.
     .sort(([a], [b]) => b.length - a.length)
     .map(([id, p]) => {
       const on = p.listed ? '1' : '0';
@@ -192,12 +203,18 @@ function editPage(id: string, p: Listing): string {
         }></div>`,
     )
     .join('');
-  return `<!doctype html><html><head><meta charset="utf-8"><title>Edit ${id}</title></head><body data-pid="${id}">
+  // Listed before the real Save on purpose: a substring match on "Simpan" picks this one first.
+  const draft = `<button id="draft-btn" type="button" onclick="fetch('/__draft', { method: 'POST' })">Simpan Draf</button>`;
+  const save = p.onlyDraftSave ? '' : `<button id="save-btn" type="button">Simpan</button>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Edit ${id}</title></head><body data-pid="${id}"${
+    p.noToast ? ' data-no-toast="1"' : ''
+  }>
 <h1>${p.name}</h1>
 ${landing}
 <section class="price-section">${price}</section>
 <section class="stock-section">${stock}</section>
-<button id="save-btn" type="button">Simpan</button>
+${draft}
+${save}
 <div id="toast" class="toast" style="display:none">Berhasil disimpan</div>
 <script>${EDIT_SCRIPT}</script>
 </body></html>`;
@@ -240,6 +257,10 @@ async function routeSeller(route: Route, req: Request): Promise<void> {
     portal.decoyClicks++;
     return reply(route, 200, '{}', 'application/json');
   }
+  if (p === '/__draft') {
+    portal.draftClicks++;
+    return reply(route, 200, '{}', 'application/json');
+  }
   if (p.startsWith('/api/')) return reply(route, 200, '{"error":0,"data":{}}', 'application/json');
   if (p === '/portal/product/list/live/all') return reply(route, 200, listPage());
 
@@ -252,17 +273,44 @@ async function routeSeller(route: Route, req: Request): Promise<void> {
   return reply(route, 404, 'not found');
 }
 
+/** The buyer side only needs one product page and one API endpoint for the account-write checks. */
+async function routeBuyer(route: Route, req: Request): Promise<void> {
+  const p = new URL(req.url()).pathname;
+  if (p.startsWith('/api/')) return reply(route, 200, '{"error":0,"data":{}}', 'application/json');
+  return reply(
+    route,
+    200,
+    '<!doctype html><html><head><meta charset="utf-8"><title>Produk</title></head><body><h1>Water bottle</h1></body></html>',
+  );
+}
+
 async function setup(): Promise<void> {
   const ctx: BrowserContext = await getContext(true);
-  // Registered first, so it is the fallback: anything off the fixture host is aborted.
+  // Registered first, so it is the fallback: anything off the fixture hosts is aborted.
   await ctx.route(
-    (url: URL) => url.hostname !== FIXTURE_HOST,
+    (url: URL) => url.hostname !== FIXTURE_HOST && url.hostname !== BUYER_HOST,
     (route: Route) => route.abort(),
   );
   await ctx.route(
     (url: URL) => url.hostname === FIXTURE_HOST,
     (route: Route, req: Request) => routeSeller(route, req),
   );
+  await ctx.route(
+    (url: URL) => url.hostname === BUYER_HOST,
+    (route: Route, req: Request) => routeBuyer(route, req),
+  );
+}
+
+async function readAudit(): Promise<
+  Array<{ kind: string; tool: string; ok: boolean; error?: string }>
+> {
+  const text = await fs
+    .readFile(path.join(HOME, '.shopee-mcp', 'audit.log'), 'utf8')
+    .catch(() => '');
+  return text
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as { kind: string; tool: string; ok: boolean; error?: string });
 }
 
 // ─── Checks ───────────────────────────────────────────────────────────────────
@@ -328,6 +376,29 @@ check('a Save that shows a toast but stores nothing is reported, not trusted', a
   assert.match(out, /Check the product in Seller Centre/);
   assert.deepEqual(portal.saves, ['4004']);
   assert.deepEqual(portal.products['4004'].price, [90000]);
+});
+
+check(
+  'save presses the button labelled exactly Simpan, not the look-alike Simpan Draf',
+  async () => {
+    const out = await updateProductPrice({ itemId: '1001', value: 165000 });
+    assert.match(out, /set to 165,000 and saved/);
+    assert.deepEqual(portal.products['1001'].price, [165000]);
+    assert.equal(portal.draftClicks, 0, 'the draft button must not be pressed');
+  },
+);
+
+check('a save that persists without a success toast is reported from the re-read', async () => {
+  const out = await updateProductPrice({ itemId: '6006', value: 47000 });
+  assert.match(out, /set to 47,000 and saved/);
+  assert.match(out, /No success toast/);
+  assert.deepEqual(portal.products['6006'].price, [47000]);
+});
+
+check('with no exact Save button, nothing is clicked and nothing is saved', async () => {
+  await assert.rejects(updateProductPrice({ itemId: '4141', value: 26000 }), /No Save button/);
+  assert.equal(portal.draftClicks, 0, 'the look-alike draft button must not be pressed');
+  assert.deepEqual(portal.products['4141'].price, [25000]);
 });
 
 check('listing: a product already in the requested state is left alone', async () => {
@@ -400,12 +471,40 @@ check('every write is audited, and a refused write keeps a screenshot', async ()
   await fs.access(refusal.screenshotPath);
 
   await updateProductPrice({ itemId: '1001', value: 170000 });
-  const entries = (await fs.readFile(path.join(HOME, '.shopee-mcp', 'audit.log'), 'utf8'))
-    .trim()
-    .split('\n')
-    .map((line) => JSON.parse(line) as { tool: string; ok: boolean });
+  const entries = await readAudit();
   assert.ok(entries.some((e) => e.tool === 'seller:update-stock' && e.ok === false));
   assert.ok(entries.some((e) => e.tool === 'seller:update-price' && e.ok === true));
+});
+
+check('an account write spends the write budget and is audited', async () => {
+  const before = safetyStatus().writesLastHour;
+  await captureAccountWrite('like_product', `${BUYER_BASE}/product/1/2`, {
+    apiMatches: ['pdp/like_items'],
+    timeoutMs: 15000,
+    interact: async (page) => {
+      await page.evaluate(() =>
+        fetch('/api/v4/pdp/like_items', { method: 'POST' }).then((r) => r.text()),
+      );
+    },
+  });
+  assert.equal(safetyStatus().writesLastHour, before + 1, 'an account write must count as a write');
+  const entries = await readAudit();
+  assert.ok(
+    entries.some((e) => e.kind === 'write' && e.tool === 'like_product' && e.ok === true),
+    'an account write must be audited',
+  );
+});
+
+check('a read capture does not spend the write budget', async () => {
+  const before = safetyStatus().writesLastHour;
+  await captureAll(`${BUYER_BASE}/product/1/2`, {
+    apiMatches: ['pdp/like_items'],
+    timeoutMs: 15000,
+    interact: async (page) => {
+      await page.evaluate(() => fetch('/api/v4/pdp/like_items').then((r) => r.text()));
+    },
+  });
+  assert.equal(safetyStatus().writesLastHour, before);
 });
 
 // ─── Runner ───────────────────────────────────────────────────────────────────

@@ -120,24 +120,27 @@ async function applyNumericUpdate(kind: FieldKind, args: NumericUpdateArgs): Pro
         );
       }
 
-      const saved = await saveProduct(page);
-      if (!saved) {
-        throw new Error(
-          'Save was clicked but no success toast appeared — verify on the edit page. Nothing else was changed.',
-        );
-      }
+      // The toast is only a hint. The re-read below is what decides.
+      const { toastSeen } = await saveProduct(page);
 
       // Guard 3b: prove it persisted, from a fresh page load.
       await openProductEdit(page, itemId);
       await stepDelay();
       const after = await inputsFor(page).catch((): Locator[] => []);
       const shownAfter = await readField(after[idx]);
+      const target = value.toLocaleString('en-US');
       if (numericMatches(shownAfter, value)) {
-        return `💰 ${label} for ${where} set to ${value.toLocaleString('en-US')} and saved (re-read the edit page to confirm).`;
+        const note = toastSeen
+          ? ''
+          : ' No success toast appeared, so the saved value was checked from a fresh load only.';
+        return `💰 ${label} for ${where} set to ${target} and saved (re-read the edit page to confirm).${note}`;
       }
+      const reported = toastSeen
+        ? 'Save reported success, but'
+        : 'Save was clicked and no success message appeared, and';
       return (
-        `⚠️ ${label} for ${where}: Save reported success, but the edit page now shows ` +
-        `"${shownAfter || '(empty)'}" instead of ${value.toLocaleString('en-US')}. ` +
+        `⚠️ ${label} for ${where}: ${reported} the edit page now shows ` +
+        `"${shownAfter || '(empty)'}" instead of ${target}. ` +
         'Check the product in Seller Centre before relying on this.'
       );
     },

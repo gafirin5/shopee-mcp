@@ -3,6 +3,7 @@ import 'dotenv/config';
 import os from 'node:os';
 import path from 'node:path';
 import type { BrowserContext, Page, Response } from 'playwright';
+import { audit } from '../utils/audit.js';
 import { createSafetyGate } from '../utils/rate-limit.js';
 
 // ─── Configuration ────────────────────────────────────────────────────────────
@@ -424,6 +425,32 @@ export async function withPage<T>(fn: (page: Page) => Promise<T>): Promise<T> {
   return withBrowserLock(async () => fn(await getPage()));
 }
 
+/** Why an operation failed, trimmed for the audit log. */
+function errorText(err: unknown): string {
+  return (err instanceof Error ? err.message : String(err)).slice(0, 300);
+}
+
+/**
+ * Run one account write under the write budget and spacing, then audit it.
+ * `fn` runs inside the browser lock, so it must not call captureAll or withPage
+ * (they take the lock again and would deadlock). `ok` means the browser step
+ * finished without throwing; the tool's reply carries the business outcome.
+ */
+export async function withAccountWrite<T>(
+  tool: string,
+  detail: string,
+  fn: (page: Page) => Promise<T>,
+): Promise<T> {
+  try {
+    const result = await withBrowserLock(async () => fn(await getPage()), 'write');
+    audit({ kind: 'write', tool, ok: true, detail });
+    return result;
+  } catch (err) {
+    audit({ kind: 'write', tool, ok: false, detail, error: errorText(err) });
+    throw err;
+  }
+}
+
 /** One JSON response gathered by captureAll. */
 export interface CollectedResponse {
   url: string;
@@ -451,40 +478,66 @@ export interface CollectOptions {
  *
  * Matches any `/api/vN/` path, not just v4: reviews still live on /api/v2.
  */
+/**
+ * Collect matching API responses while `pageUrl` loads and `interact` runs.
+ * This is a read: it spends the read budget. An account write (like, follow,
+ * claim, cart changes) must go through captureAccountWrite instead.
+ */
 export async function captureAll(
   pageUrl: string,
   opts: CollectOptions,
 ): Promise<CollectedResponse[]> {
+  return withBrowserLock(async () => collectResponses(await getPage(), pageUrl, opts));
+}
+
+/**
+ * The same collection, as an account write (like, follow, claim, add to cart,
+ * cart edits). It spends the write budget, waits the write spacing, and leaves
+ * an audit entry, the same treatment a Seller Centre write gets. Until now these
+ * went through captureAll, so they counted as reads and were not audited.
+ */
+export function captureAccountWrite(
+  tool: string,
+  pageUrl: string,
+  opts: CollectOptions,
+): Promise<CollectedResponse[]> {
+  return withAccountWrite(tool, pageUrl.split('?')[0], (page) =>
+    collectResponses(page, pageUrl, opts),
+  );
+}
+
+async function collectResponses(
+  page: Page,
+  pageUrl: string,
+  opts: CollectOptions,
+): Promise<CollectedResponse[]> {
   const timeoutMs = opts.timeoutMs ?? 60000;
-  return withBrowserLock(async () => {
-    const page = await getPage();
-    const collected: CollectedResponse[] = [];
-    const pending: Promise<void>[] = [];
+  const collected: CollectedResponse[] = [];
+  const pending: Promise<void>[] = [];
 
-    const onResponse = (r: Response): void => {
-      const url = r.url();
-      if (!/\/api\/v\d+\//.test(url) || !opts.apiMatches.some((m) => url.includes(m))) return;
-      const postData = r.request().postData() ?? '';
-      pending.push(
-        r
-          .json()
-          .then((json: unknown) => {
-            collected.push({ url, postData, json });
-          })
-          .catch(() => debug(`Unparsable response from ${url}`)),
-      );
-    };
+  const onResponse = (r: Response): void => {
+    const url = r.url();
+    if (!/\/api\/v\d+\//.test(url) || !opts.apiMatches.some((m) => url.includes(m))) return;
+    const postData = r.request().postData() ?? '';
+    pending.push(
+      r
+        .json()
+        .then((json: unknown) => {
+          collected.push({ url, postData, json });
+        })
+        .catch(() => debug(`Unparsable response from ${url}`)),
+    );
+  };
 
-    page.on('response', onResponse);
-    try {
-      await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
-      if (opts.interact) await opts.interact(page, collected);
-      await Promise.all(pending);
-    } finally {
-      page.off('response', onResponse);
-    }
-    return collected;
-  });
+  page.on('response', onResponse);
+  try {
+    await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+    if (opts.interact) await opts.interact(page, collected);
+    await Promise.all(pending);
+  } finally {
+    page.off('response', onResponse);
+  }
+  return collected;
 }
 
 /**
