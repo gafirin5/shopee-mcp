@@ -66,16 +66,16 @@ Reachable via the same browser profile (`seller.shopee.co.id` — the portal usu
 
 Reads of **your own** buyer account, plus the only tools anywhere in this server that can modify the account. They stay hidden until the session is confirmed logged in; turn them off with `SHOPEE_ACCOUNT_TOOLS=off`.
 
-| Tool                                    | What it does                                                                                                                        |
-| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `get_orders` / `get_order_detail`       | Your orders by tab (all, to ship, to receive, completed, cancelled) — status, shop, items, totals; one order's timeline & tracking. |
-| `get_my_vouchers` / `get_shop_vouchers` | Vouchers in your wallet; a shop's claimable vouchers and which ones you've claimed.                                                 |
-| `get_coins`                             | Shopee Coins balance and recent coin transactions.                                                                                  |
-| `get_notifications`                     | Order updates, promotions, or Shopee announcements.                                                                                 |
-| `get_cart`                              | Your cart grouped by shop — items, variants, quantities, prices, model IDs.                                                         |
-| `add_to_cart` / `update_cart_item`      | Add a product (exact variant via `modelId`) in a quantity of 1-20; change a line's quantity, or remove it with `quantity: 0`.       |
-| `like_product` / `follow_shop`          | Like/unlike a product; follow/unfollow a shop.                                                                                      |
-| `claim_shop_voucher`                    | Claim one of a shop's vouchers into your wallet — requires `confirm: true` (a claim can't be undone).                               |
+| Tool                                    | What it does                                                                                                                                                                               |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `get_orders` / `get_order_detail`       | Your orders by tab (all, to ship, to receive, completed, cancelled) — status, shop, items, totals; one order's timeline & tracking.                                                        |
+| `get_my_vouchers` / `get_shop_vouchers` | Vouchers in your wallet; a shop's claimable vouchers and which ones you've claimed.                                                                                                        |
+| `get_coins`                             | Shopee Coins balance and recent coin transactions.                                                                                                                                         |
+| `get_notifications`                     | Order updates, promotions, or Shopee announcements.                                                                                                                                        |
+| `get_cart`                              | Your cart grouped by shop — items, variants, quantities, prices, model IDs.                                                                                                                |
+| `add_to_cart` / `update_cart_item`      | Add a product (exact variant via `modelId`) in a quantity of 1-20; change a line's quantity, or remove it with `quantity: 0`. Both need `confirm: true` (a preview is returned otherwise). |
+| `like_product` / `follow_shop`          | Like/unlike a product; follow/unfollow a shop. Both need `confirm: true` (a preview is returned otherwise).                                                                                |
+| `claim_shop_voucher`                    | Claim one of a shop's vouchers into your wallet — requires `confirm: true` (a claim can't be undone).                                                                                      |
 
 ### Write actions — gated
 
@@ -192,9 +192,9 @@ Every browser operation — read or write — passes through one account-safety 
 1. **Jittered spacing** — reads wait 3–6 s between operations, writes 1–3 min. Never a fixed rhythm.
 2. **Budgets** — max 30 reads/hour, 10 writes/hour, 30 writes/day (persisted in `~/.shopee-mcp/usage.json`, surviving restarts). Exceeding a budget fails fast with the reset time instead of hammering. Operator budgets count _operations_; the browser also tallies every Shopee API request and `safety_status` reports the rolling-hour total, cap it with `SHOPEE_API_REQUESTS_MAX_PER_HOUR` if you want a traffic ceiling too.
 3. **Anti-bot circuit breaker** — an anti-bot block (`90309999`), an auth-required error, or two consecutive timeouts cools the whole server down for 10 minutes. Tools fail fast during cooldown with the unlock time; don't force retries.
-4. **Two-step confirmation** — every Seller Centre write tool (price/stock edits, list/unlist, video upload & removal, chat replies) and `post_shopee_video` returns a **preview** unless called with `confirm: true`, so an AI client can never modify your shop uninvited. `claim_shop_voucher` is gated the same way (a claim cannot be undone); the remaining experimental account actions (`add_to_cart`, `update_cart_item`, `like_product`, `follow_shop`) act directly, but stay hidden until you are logged in, are rate-limited and audited like every other write, and never check out or pay.
+4. **Two-step confirmation** — every Seller Centre write tool (price/stock edits, list/unlist, video upload & removal, chat replies), `post_shopee_video`, and every account write (`claim_shop_voucher`, `like_product`, `follow_shop`, `add_to_cart`, `update_cart_item`) returns a **preview** unless called with `confirm: true`, so an AI client can never change your shop or account uninvited. The account tools stay hidden until you are logged in, count against the write budget like the seller writes, are audited, and never check out or pay.
 5. **Seller-write switch** — all seller-side writes stay disabled until `SHOPEE_ENABLE_SELLER_WRITES=true` in `.env`.
-6. **Audit trail** — every write (success or failure) and every block is appended to `~/.shopee-mcp/audit.log` (JSONL).
+6. **Audit trail** — every write (Seller Centre or account; success or failure) and every block is appended to `~/.shopee-mcp/audit.log` (JSONL).
 7. **Introspection** — the `safety_status` tool shows budgets used, next allowed slots, and cooldown state.
 
 **Honest limits:** these measures reduce the risk of behavioural detection; they cannot eliminate it. Automation of any kind remains against Shopee's ToS — run this only on your own account, at low volume, and never for bulk scraping. Rotating proxies are out of scope by design.

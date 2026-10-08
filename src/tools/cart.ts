@@ -12,9 +12,16 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { Page } from 'playwright';
 import { z } from 'zod';
 import { requireLogin, shopeeCapture, shopeeUrl } from '../api/client.js';
-import { BASE_URL, CURRENCY, captureAll, waitForCollected, withPage } from '../browser/session.js';
+import {
+  BASE_URL,
+  CURRENCY,
+  captureAccountWrite,
+  waitForCollected,
+  withAccountWrite,
+} from '../browser/session.js';
 import type { CollectedResponse } from '../browser/session.js';
 import { registerAccountTool } from '../account-mode.js';
+import { confirmGate } from '../utils/confirm.js';
 import { withErrorHandling } from '../utils/errors.js';
 import { formatPrice } from '../utils/price.js';
 import { resolveProductIds } from './product.js';
@@ -249,7 +256,7 @@ export function registerCartTools(server: McpServer): void {
       'add_to_cart',
       '[Experimental — modifies your Shopee account] Add a product (and specific variant) to the logged-in cart by ' +
         'clicking Shopee’s own "Add to Cart" button. Never checks out or pays. For multi-variant listings, ' +
-        'call get_product_variants first and pass the exact modelId. Only call this when the user explicitly asks.',
+        'call get_product_variants first and pass the exact modelId. Only call this when the user explicitly asks. Needs confirm=true; without it a preview is returned.',
       {
         shopId: z.string().optional().describe('Numeric shop ID'),
         itemId: z.string().optional().describe('Numeric item/product ID'),
@@ -267,13 +274,23 @@ export function registerCartTools(server: McpServer): void {
           .max(20)
           .default(1)
           .describe('Quantity to add, 1-20 (default: 1)'),
+        confirm: z
+          .boolean()
+          .default(false)
+          .describe('Must be true to add to the cart; false returns a preview only'),
       },
       { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-      async ({ shopId, itemId, url, modelId, quantity }) =>
+      async ({ shopId, itemId, url, modelId, quantity, confirm }) =>
         withErrorHandling(async () => {
           const ids = resolveProductIds(shopId, itemId, url);
           if (!ids)
             return text('❌ Please provide both `shopId` and `itemId`, or a full product `url`.');
+
+          const gate = confirmGate(
+            confirm,
+            `Add product ${ids.itemId} (shop ${ids.shopId}${modelId ? `, variant ${modelId}` : ''}) × ${quantity} to your Shopee cart.`,
+          );
+          if (gate) return gate;
 
           const productUrl = shopeeUrl(`/product/${ids.shopId}/${ids.itemId}`);
           const data = await shopeeCapture<PdpResponse>(productUrl, 'pdp/get_pc');
@@ -305,7 +322,7 @@ export function registerCartTools(server: McpServer): void {
             return text('❌ Could not map this variant to the page’s options. Nothing was added.');
           }
 
-          const result = await withPage(async (page) => {
+          const result = await withAccountWrite('add_to_cart', productUrl, async (page) => {
             await page.goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
             // Wait for the buy box to render before touching it.
             await page
@@ -400,7 +417,7 @@ export function registerCartTools(server: McpServer): void {
       'update_cart_item',
       '[Experimental — modifies your Shopee account] Change the quantity of an item already in the cart, ' +
         'or remove it with quantity=0, using the cart page’s own +/−/Delete controls. Get itemId and modelId ' +
-        'from get_cart. Only call this when the user explicitly asks.',
+        'from get_cart. Only call this when the user explicitly asks. Needs confirm=true; without it a preview is returned.',
       {
         itemId: z.string().min(1).describe('Numeric item ID of the cart line (from get_cart)'),
         modelId: z
@@ -417,16 +434,28 @@ export function registerCartTools(server: McpServer): void {
           .describe(
             `New quantity; 0 removes the line. Changes by at most ${MAX_QUANTITY_STEP} per call.`,
           ),
+        confirm: z
+          .boolean()
+          .default(false)
+          .describe('Must be true to apply the change; false returns a preview only'),
       },
       { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
-      async ({ itemId, modelId, quantity }) =>
+      async ({ itemId, modelId, quantity, confirm }) =>
         withErrorHandling(async () => {
+          const lineLabel = `${itemId}${modelId ? ` (variant ${modelId})` : ''}`;
+          const gate = confirmGate(
+            confirm,
+            quantity === 0
+              ? `Remove cart line ${lineLabel} from your Shopee cart.`
+              : `Set cart line ${lineLabel} to quantity ${quantity}.`,
+          );
+          if (gate) return gate;
           await requireLogin();
           let outcome: string | undefined;
           let line: CartItem | undefined;
           let applied = 0;
 
-          await captureAll(shopeeUrl('/cart'), {
+          await captureAccountWrite('update_cart_item', shopeeUrl('/cart'), {
             apiMatches: ['cart/get', 'cart/update'],
             interact: async (page, got) => {
               const loaded = await waitForCollected(

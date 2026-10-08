@@ -5,7 +5,7 @@
  * Run with: npm run test:unit
  */
 import assert from 'node:assert/strict';
-import type { RegisteredTool } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer, RegisteredTool } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { flattenSearchItems, buildSearchPath } from '../src/tools/search.js';
 import {
   parseProductUrl,
@@ -23,6 +23,8 @@ import { cache } from '../src/utils/cache.js';
 import { regionFor } from '../src/browser/session.js';
 import { findArray, previewRow, formatSellerPayload } from '../src/tools/seller/format.js';
 import { findVideoInfo } from '../src/utils/media.js';
+import { registerActionTools } from '../src/tools/actions.js';
+import { registerCartTools } from '../src/tools/cart.js';
 import { summarizeJson } from '../src/utils/json.js';
 import { parseProductRef } from '../src/tools/research.js';
 import { parseShopRef, formatDuration, formatShop } from '../src/tools/shop.js';
@@ -1465,6 +1467,91 @@ test('confirmGate: without confirm:true it previews and returns, executing nothi
   assert.match(preview.content[0].text, /Set price of product `1001`/);
   assert.ok(confirmGate(false, 'p'), 'confirm:false must also preview');
   assert.equal(confirmGate(true, 'p'), null, 'confirm:true must let the action run');
+});
+
+// ─── Account writes: confirm gate ───────────────────────────────────────────
+// The account tools register only while logged in, so the real registry cannot
+// be reached from here. A fake server records what each tool registers. The
+// preview path returns before any browser or network call, so these run offline.
+type ToolResult = { content: Array<{ type: string; text: string }> };
+type ToolHandler = (args: Record<string, unknown>) => Promise<ToolResult>;
+
+function recordTools(
+  register: (server: McpServer) => void,
+): Map<string, { shape: Record<string, unknown>; handler: ToolHandler }> {
+  const found = new Map<string, { shape: Record<string, unknown>; handler: ToolHandler }>();
+  const fake = {
+    tool(
+      name: string,
+      _description: string,
+      shape: Record<string, unknown>,
+      _annotations: unknown,
+      handler: ToolHandler,
+    ) {
+      found.set(name, { shape, handler });
+      return { enabled: true } as unknown as RegisteredTool;
+    },
+  };
+  register(fake as unknown as McpServer);
+  return found;
+}
+
+const ACCOUNT_WRITES = [
+  'like_product',
+  'follow_shop',
+  'add_to_cart',
+  'update_cart_item',
+  'claim_shop_voucher',
+];
+const accountTools = new Map([
+  ...recordTools(registerActionTools),
+  ...recordTools(registerCartTools),
+]);
+
+function withinMs<T>(work: Promise<T>, ms: number, label: string): Promise<T> {
+  const timer = new Promise<never>((_, reject) => {
+    setTimeout(
+      () =>
+        reject(new Error(`${label} did not return within ${ms} ms — did it reach the browser?`)),
+      ms,
+    ).unref();
+  });
+  return Promise.race([work, timer]);
+}
+
+test('every account write declares a confirm parameter', () => {
+  for (const name of ACCOUNT_WRITES) {
+    const tool = accountTools.get(name);
+    assert.ok(tool, `${name} should be registered`);
+    assert.ok('confirm' in tool.shape, `${name} should take confirm`);
+  }
+});
+
+test('account writes without confirm return a preview and do nothing', async () => {
+  const calls: Record<string, Record<string, unknown>> = {
+    like_product: { shopId: '1', itemId: '2' },
+    follow_shop: { shopId: '1' },
+    add_to_cart: { shopId: '1', itemId: '2', quantity: 1 },
+    update_cart_item: { itemId: '3', quantity: 0 },
+    claim_shop_voucher: { shopId: '1', voucherCode: 'ABC' },
+  };
+  for (const [name, args] of Object.entries(calls)) {
+    const tool = accountTools.get(name);
+    assert.ok(tool, `${name} should be registered`);
+    const result = await withinMs(tool.handler(args), 5000, name);
+    assert.match(result.content[0].text, /WRITE PREVIEW — nothing executed yet/, name);
+  }
+});
+
+test('a cart removal preview says it removes the line', async () => {
+  const tool = accountTools.get('update_cart_item');
+  assert.ok(tool, 'update_cart_item should be registered');
+  const result = await withinMs(
+    tool.handler({ itemId: '3', quantity: 0 }),
+    5000,
+    'update_cart_item',
+  );
+  assert.match(result.content[0].text, /Remove cart line 3 from your Shopee cart/);
 });
 
 await runTests();
