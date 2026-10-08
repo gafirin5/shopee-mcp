@@ -35,6 +35,9 @@ jobs:
       - run: npm run format:check
       - run: npm run typecheck
       - run: npm run build
+      # Never publish a package that cannot boot or has broken helpers.
+      - run: npm run test:unit
+      - run: npm run test:tools
 
       - name: Publish to npm (OIDC Trusted Publishing — tokenless)
         run: |
