@@ -68,7 +68,6 @@ export async function shopeeCapture<T extends { error?: number; error_msg?: stri
     const msg = e instanceof Error ? e.message : String(e);
     if (/timeout/i.test(msg)) {
       // A timeout usually means the anti-bot gate silently dropped the request, but a
-      // A timeout usually means the anti-bot gate silently dropped the request, but a
       // slow page load or transient network blip looks identical. Retry once — after a
       // jittered 3–8 s pause, never instantly (an immediate identical retry is exactly
       // what a bot does) — and only while the session is still alive mid-request;

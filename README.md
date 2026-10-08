@@ -258,7 +258,7 @@ npm run lint         # eslint
 npm run format       # prettier --write (format:check to verify)
 npm run typecheck
 npm run test:unit    # offline unit tests (no login/display needed)
-npm run test:browser # seller writes vs. a local fixture (CLOAKBROWSER_BINARY_PATH=/path/to/chromium)
+npm run test:browser # seller and account writes vs. local fixtures (CLOAKBROWSER_BINARY_PATH=/path/to/chromium)
 npm test             # live smoke test (needs a display; use xvfb-run on servers)
 npm run dev          # tsx watch
 ```
