@@ -16,6 +16,7 @@ export function registerSellerChatTools(server: McpServer): void {
       'of the list the app itself loads). The raw response shows buyer names and chat ids ' +
       'for read_chat / send_chat_reply.',
     {},
+    { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
     async () => {
       return withErrorHandling(async () => {
         const { json, matchedUrl } = await sellerCaptureRaw<unknown>(
@@ -53,6 +54,7 @@ export function registerSellerChatTools(server: McpServer): void {
         .default(30)
         .describe('How many of the latest messages to return (default 30)'),
     },
+    { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
     async ({ match, limit }) => {
       return withErrorHandling(async () => {
         const text = await withSellerAction('read-chat', async (page) => {
@@ -93,6 +95,7 @@ export function registerSellerChatTools(server: McpServer): void {
       message: z.string().min(1).max(2000).describe('The reply text to send'),
       confirm: z.boolean().default(false).describe('Must be true to actually send'),
     },
+    { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     async ({ match, message, confirm }) => {
       return withErrorHandling(async () => {
         assertSellerWritesEnabled('send_chat_reply');

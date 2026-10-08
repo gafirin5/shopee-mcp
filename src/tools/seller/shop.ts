@@ -16,6 +16,7 @@ export function registerSellerShopTools(server: McpServer): void {
       '(shop name, id, region, status). Direct portal-API call — works even while ' +
       'a brand-new shop is still on the onboarding gate.',
     {},
+    { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
     async () => {
       return withErrorHandling(async () => {
         let json: Record<string, unknown>;
@@ -56,6 +57,7 @@ export function registerSellerShopTools(server: McpServer): void {
     'Fetch the wallet/income summary page from the Seller Centre portal ' +
       '(/portal/finance/income — balance snapshot the income page loads).',
     {},
+    { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
     async () => {
       return withErrorHandling(async () => {
         const json = await sellerCapture<Record<string, unknown>>(SELLER_PATHS.income, [
@@ -85,6 +87,7 @@ export function registerSellerShopTools(server: McpServer): void {
     'Fetch the shop performance dashboard from the Seller Centre (business insight ' +
       'lives in the separate /datacenter/ app — this captures what it loads).',
     {},
+    { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
     async () => {
       return withErrorHandling(async () => {
         const json = await sellerCapture<Record<string, unknown>>(SELLER_PATHS.analytics, [
@@ -110,6 +113,7 @@ export function registerSellerShopTools(server: McpServer): void {
     'Fetch the marketing/promotions overview from the Seller Centre portal ' +
       '(/portal/marketing — active campaigns snapshot).',
     {},
+    { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
     async () => {
       return withErrorHandling(async () => {
         const json = await sellerCapture<Record<string, unknown>>(SELLER_PATHS.marketing, [

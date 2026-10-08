@@ -39,15 +39,17 @@ export function registerStatusTools(server: McpServer): void {
       'writes today), next allowed read/write, and whether the anti-bot cooldown is active. ' +
       'Check this when a tool reports a budget or cooldown error.',
     {},
+    { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
     async () => {
       return withErrorHandling(async () => {
         const s = safetyStatus();
         const lines = [
           '🛡️ Account-safety gate',
           '',
-          `   Reads last hour   : ${s.readsLastHour}/30`,
-          `   Writes last hour  : ${s.writesLastHour}/10`,
-          `   Writes today      : ${s.writesToday}/30`,
+          // Budgets come from the gate, so SHOPEE_*_MAX_* overrides show up here.
+          `   Reads last hour   : ${s.readsLastHour}/${s.limits.readMaxPerHour}`,
+          `   Writes last hour  : ${s.writesLastHour}/${s.limits.writeMaxPerHour}`,
+          `   Writes today      : ${s.writesToday}/${s.limits.writeMaxPerDay}`,
           `   Next read allowed : ${fmtTime(s.nextReadAllowedMs)}`,
           `   Next write allowed: ${fmtTime(s.nextWriteAllowedMs)}`,
           s.blockedUntilMs

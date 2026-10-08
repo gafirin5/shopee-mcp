@@ -4,7 +4,7 @@
  */
 import 'dotenv/config';
 import type { Response } from 'playwright';
-import { withBrowserLock, closeContext, BASE_URL } from '../src/browser/session.js';
+import { withBrowserLock, closeContext } from '../src/browser/session.js';
 
 async function main(): Promise<void> {
   await withBrowserLock(async () => {

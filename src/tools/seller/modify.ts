@@ -26,15 +26,24 @@ const numericArgs = {
 export function registerSellerModifyTools(server: McpServer): void {
   server.tool(
     'update_price',
-    'Set a product price via the Seller Centre edit page (IDR, no separators), then save. ' +
+    'Set a product price via the Seller Centre edit page, then save. The price is a plain ' +
+      'number in the currency the portal is showing (no separators or symbol). ' +
       'Requires confirm=true; without it returns a preview. Rate-limited like every write.',
-    { ...numericArgs, price: z.number().int().min(1).describe('New price in IDR, e.g. 150000') },
+    {
+      ...numericArgs,
+      price: z
+        .number()
+        .int()
+        .min(1)
+        .describe('New price as a whole number in the shop currency, e.g. 150000'),
+    },
+    { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     async ({ item_id, variation_index, price, confirm }) => {
       return withErrorHandling(async () => {
         assertSellerWritesEnabled('update_price');
         const gate = confirmGate(
           confirm,
-          `Set price of product \`${item_id}\`${variation_index !== undefined ? ` (variation ${variation_index})` : ''} → **${price.toLocaleString('id-ID')} IDR**, then save.`,
+          `Set price of product \`${item_id}\`${variation_index !== undefined ? ` (variation ${variation_index})` : ''} → **${price.toLocaleString('en-US')}**, then save.`,
         );
         if (gate) return gate;
         const text = await updateProductPrice({
@@ -52,6 +61,7 @@ export function registerSellerModifyTools(server: McpServer): void {
     'Set a product stock level via the Seller Centre edit page, then save. ' +
       'Requires confirm=true; without it returns a preview. Rate-limited like every write.',
     { ...numericArgs, stock: z.number().int().min(0).describe('New stock quantity') },
+    { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     async ({ item_id, variation_index, stock, confirm }) => {
       return withErrorHandling(async () => {
         assertSellerWritesEnabled('update_stock');
@@ -78,6 +88,7 @@ export function registerSellerModifyTools(server: McpServer): void {
       item_id: z.string().min(1).describe('The product/item id'),
       confirm: z.boolean().default(false).describe('Must be true to execute'),
     },
+    { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
     async ({ item_id, confirm }) => {
       return withErrorHandling(async () => {
         assertSellerWritesEnabled('unlist_item');
@@ -97,6 +108,7 @@ export function registerSellerModifyTools(server: McpServer): void {
       item_id: z.string().min(1).describe('The product/item id'),
       confirm: z.boolean().default(false).describe('Must be true to execute'),
     },
+    { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     async ({ item_id, confirm }) => {
       return withErrorHandling(async () => {
         assertSellerWritesEnabled('list_item');

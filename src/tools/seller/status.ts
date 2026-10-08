@@ -9,6 +9,7 @@ export function registerSellerStatusTools(server: McpServer): void {
       `portal (seller.${DOMAIN}). Seller tools fail fast without it. ` +
       'If this reports signed-out, run `npm run login:seller` once.',
     {},
+    { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
     async () => {
       return withErrorHandling(async () => {
         const ok = await isSellerLoggedIn();

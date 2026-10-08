@@ -781,6 +781,14 @@ test('safety: cooldown releases after the cooldown window (half-open)', async ()
   await gate.acquire('read'); // allowed again
 });
 
+test('safety: status reports the configured budgets, not hardcoded defaults', async () => {
+  const { gate } = makeGate({ readMaxPerHour: 7, writeMaxPerHour: 3, writeMaxPerDay: 9 });
+  await gate.acquire('read');
+  const s = gate.status();
+  assert.equal(s.readsLastHour, 1);
+  assert.deepEqual(s.limits, { readMaxPerHour: 7, writeMaxPerHour: 3, writeMaxPerDay: 9 });
+});
+
 test('safety: reportSuccess resets the timeout streak', async () => {
   const { gate } = makeGate();
   gate.reportFailure(new Error('Timeout 30000ms exceeded'));

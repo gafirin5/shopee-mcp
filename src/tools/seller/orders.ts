@@ -39,6 +39,7 @@ export function registerSellerOrderTools(server: McpServer): void {
         .default(20)
         .describe('Max rows to render (default: 20)'),
     },
+    { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
     async ({ list_type, max_rows }) => {
       return withErrorHandling(async () => {
         const typeParam: Record<string, string | undefined> = {
@@ -82,6 +83,7 @@ export function registerSellerOrderTools(server: McpServer): void {
     {
       order_id: z.string().min(1).describe('The numeric order id (from list_orders)'),
     },
+    { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
     async ({ order_id }) => {
       return withErrorHandling(async () => {
         const path = `/portal/sale/order/detail?order_id=${encodeURIComponent(order_id)}`;

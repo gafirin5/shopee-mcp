@@ -27,6 +27,7 @@ export function registerSellerProductTools(server: McpServer): void {
         .default(20)
         .describe('Max rows to render (default: 20)'),
     },
+    { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
     async ({ page, max_rows }) => {
       return withErrorHandling(async () => {
         let json: Record<string, unknown>;

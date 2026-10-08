@@ -35,6 +35,7 @@ export function registerShopeeVideoTools(server: McpServer): void {
     'Check whether the Shopee Video web build currently exposes an upload entry point ' +
       '(it is an app-first feature, so this can legitimately be "not available via web").',
     {},
+    { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
     async () => {
       return withErrorHandling(async () => {
         const text = await withBuyerAction('shopee-video-probe', async (page) => {
@@ -75,6 +76,7 @@ export function registerShopeeVideoTools(server: McpServer): void {
       caption: z.string().max(2000).describe('Caption text (include product links if any)'),
       confirm: z.boolean().default(false).describe('Must be true to actually post'),
     },
+    { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     async ({ video_path, caption, confirm }) => {
       return withErrorHandling(async () => {
         const gate = confirmGate(

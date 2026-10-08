@@ -36,6 +36,7 @@ export function registerSellerProbeTools(server: McpServer): void {
         .default(30000)
         .describe('How long to wait for the matching response (ms)'),
     },
+    { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
     async ({ path, match, timeout_ms }) => {
       return withErrorHandling(async () => {
         const { json, matchedUrl } = await sellerCaptureRaw<unknown>(path, match, timeout_ms);

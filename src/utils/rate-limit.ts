@@ -94,6 +94,16 @@ export interface SafetyStatus {
   writesToday: number;
   nextReadAllowedMs: number;
   nextWriteAllowedMs: number;
+  /**
+   * The budgets this gate actually enforces. Reported so `safety_status` shows
+   * the user's configured limits instead of the hardcoded defaults it used to
+   * print (they lied whenever an env override was set).
+   */
+  limits: {
+    readMaxPerHour: number;
+    writeMaxPerHour: number;
+    writeMaxPerDay: number;
+  };
 }
 
 interface PersistedState {
@@ -270,6 +280,11 @@ export function createSafetyGate(options: SafetyGateOptions = {}) {
         writesToday: state.writesToday,
         nextReadAllowedMs: Math.max(lastOpAt.read + jitteredSpacing('read'), now()),
         nextWriteAllowedMs: Math.max(lastOpAt.write + jitteredSpacing('write'), now()),
+        limits: {
+          readMaxPerHour: cfg.readMaxPerHour,
+          writeMaxPerHour: cfg.writeMaxPerHour,
+          writeMaxPerDay: cfg.writeMaxPerDay,
+        },
       };
     },
 

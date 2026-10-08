@@ -33,6 +33,7 @@ export function registerSellerVideoTools(server: McpServer): void {
         .describe('Upload the video but do not click Save (dry preview)'),
       confirm: z.boolean().default(false).describe('Must be true to execute the upload'),
     },
+    { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     async ({ item_id, video_path, process_timeout_ms, skip_save, confirm }) => {
       return withErrorHandling(async () => {
         assertSellerWritesEnabled('upload_product_video');
@@ -60,6 +61,7 @@ export function registerSellerVideoTools(server: McpServer): void {
       item_id: z.string().min(1).describe('The product/item id'),
       confirm: z.boolean().default(false).describe('Must be true to execute'),
     },
+    { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
     async ({ item_id, confirm }) => {
       return withErrorHandling(async () => {
         assertSellerWritesEnabled('remove_product_video');
@@ -80,6 +82,7 @@ export function registerSellerVideoTools(server: McpServer): void {
       item_id: z.string().optional().describe('Numeric item id (or give url instead)'),
       url: z.string().url().optional().describe('Full marketplace product URL'),
     },
+    { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
     async ({ shop_id, item_id, url }) => {
       return withErrorHandling(async () => {
         let sid = shop_id;
