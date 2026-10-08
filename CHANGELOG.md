@@ -6,6 +6,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Ver
 
 ## [Unreleased]
 
+### Added
+
+- **Seller Centre realm** (unreleased): portal reads — `check_seller_login`, `get_seller_shop_info`, `get_seller_income`, `get_seller_analytics`, `get_seller_marketing`, `list_orders`, `get_seller_order_detail`, `list_seller_products`, `seller_api_probe` — plus write actions on your own shop: `update_price`, `update_stock`, `list_item` / `unlist_item`, `upload_product_video` / `remove_product_video`, `send_chat_reply`, `post_shopee_video`. All writes sit behind `SHOPEE_ENABLE_SELLER_WRITES`, `confirm: true`, the rate-limit gate, and the audit log.
+- **Account-safety gate** (unreleased): every browser operation passes through one gate — jittered read/write spacing, hourly/daily budgets persisted to `~/.shopee-mcp/usage.json`, an anti-bot circuit breaker, and a JSONL audit log; `safety_status` reports the state.
+- **Chat**: `list_chats`, `read_chat`, `send_chat_reply`.
+- **Buyer extras**: `get_shop_products`, `search_shops`, video info in `get_product_detail`, `check_product_video`, `shopee_video_probe`, `compare_prices`.
+- `test/tools.ts` (`npm run test:tools`): offline registry test that builds the real server and lists its tools; wired into CI.
+
+### Fixed
+
+- **The server failed to start** with `Fatal error: Error: Tool get_product_reviews is already registered` — the tool was registered twice (an older copy in `research.ts` alongside the real one in `reviews.ts`) and `server.tool()` throws on a duplicate name. The duplicate is gone and `npm run test:tools` now fails CI if it ever returns.
+- `compare_prices` read `name`/`price`/`price_min` from the top level of the PDP response (the payload is nested under `data.item` / `data.product_price`), so every listing printed `?`; it also hardcoded `Rp` and Indonesian number formatting for all regions. It now reads the real fields, renders prices in the storefront currency, and fails fast with the login prompt when signed out.
+- `safety_status` printed hardcoded budgets (`/30`, `/10`, `/30`) that ignored `SHOPEE_*_MAX_*` overrides; it now reports the limits the gate actually enforces.
+- MCP tool annotations are now sent for **every** tool, including the seller realm, the chat tools, and `safety_status` (the 0.3.0 claim only held for the buyer tools).
+- Lint: unused import in `scripts/probe-creator.ts` broke `npm run lint` (and therefore CI).
+- Docs: the release guide described a `NPM_TOKEN` secret although the workflow uses npm Trusted Publishing (OIDC); `docs/CONFIGURATION.md` was missing the safety-gate, seller-write, and action-tuning variables; `SHOPEE_SELLER_PROFILE_DIR` was documented in the README/`.env.example` but never implemented — the realms share one profile via SSO, and the docs now say so.
+
 ## [0.3.0] - 2026-09-29
 
 ### Added

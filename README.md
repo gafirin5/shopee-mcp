@@ -192,7 +192,7 @@ Every browser operation — read or write — passes through one account-safety 
 1. **Jittered spacing** — reads wait 3–6 s between operations, writes 1–3 min. Never a fixed rhythm.
 2. **Budgets** — max 30 reads/hour, 10 writes/hour, 30 writes/day (persisted in `~/.shopee-mcp/usage.json`, surviving restarts). Exceeding a budget fails fast with the reset time instead of hammering.
 3. **Anti-bot circuit breaker** — an anti-bot block (`90309999`), an auth-required error, or two consecutive timeouts cools the whole server down for 10 minutes. Tools fail fast during cooldown with the unlock time; don't force retries.
-4. **Two-step confirmation** — every write tool returns a **preview** unless called with `confirm: true`, so an AI client can never modify your account uninvited.
+4. **Two-step confirmation** — every Seller Centre write tool (price/stock edits, list/unlist, video upload & removal, chat replies) and `post_shopee_video` returns a **preview** unless called with `confirm: true`, so an AI client can never modify your shop uninvited. The experimental account actions (`add_to_cart`, `update_cart_item`, `like_product`, `follow_shop`, `claim_shop_voucher`) act directly, but stay hidden until you are logged in, are rate-limited and audited like every other write, and never check out or pay.
 5. **Seller-write switch** — all seller-side writes stay disabled until `SHOPEE_ENABLE_SELLER_WRITES=true` in `.env`.
 6. **Audit trail** — every write (success or failure) and every block is appended to `~/.shopee-mcp/audit.log` (JSONL).
 7. **Introspection** — the `safety_status` tool shows budgets used, next allowed slots, and cooldown state.
@@ -207,8 +207,7 @@ All optional — copy `.env.example` to `.env` to override. Full explanations: [
 | --------------------------------------- | ------------------------------ | --------------------------------------------------------------- |
 | `SHOPEE_DOMAIN`                         | `shopee.co.id`                 | Regional Shopee domain (`.co.id`, `.com.my`, `.sg`, `.tw`).     |
 | `SHOPEE_LOCALE` / `SHOPEE_TIMEZONE`     | _derived from domain_          | Browser locale / timezone override.                             |
-| `SHOPEE_PROFILE_DIR`                    | `~/.shopee-mcp/chrome-profile` | Where the saved login lives.                                    |
-| `SHOPEE_SELLER_PROFILE_DIR`             | (same profile)                 | Isolate the Seller Centre realm in its own profile.             |
+| `SHOPEE_PROFILE_DIR`                    | `~/.shopee-mcp/chrome-profile` | Where the saved login lives (both realms share it — SSO).       |
 | `SHOPEE_HEADLESS`                       | `false`                        | Keep `false` — headless is detected.                            |
 | `SHOPEE_ACCOUNT_TOOLS`                  | `auto`                         | `auto`: account tools while logged in; `off`: always read-only. |
 | `CACHE_TTL_MS`                          | `30000`                        | In-memory cache lifetime.                                       |

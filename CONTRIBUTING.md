@@ -41,7 +41,11 @@ More detail: [docs/DEVELOPMENT.md](./docs/DEVELOPMENT.md).
 
 - Bug fixes with steps to reproduce when possible
 - Documentation improvements (`README.md`, `docs/`)
-- Features that fit the project's scope: **public** Shopee discovery via MCP — product search and detail. This is a read-only, discovery-only tool; seller/account features are intentionally out of scope.
+- Features that fit the project's scope, which has two halves:
+  - **Discovery (buyer side)** — product search, detail, variants, reviews, shops, flash sales. Read-only apart from the experimental account tools.
+  - **Seller Centre** — reads of your own shop (orders, income, analytics, marketing, products) and write actions on that shop (price, stock, list/unlist, product video, chat replies). Writes stay behind `SHOPEE_ENABLE_SELLER_WRITES`, `confirm: true`, the rate-limit gate, and the audit log.
+
+  Anything that touches **other people's** accounts, bulk scraping, proxies, or checkout/payment is out of scope.
 
 ## AI-assisted contributions
 

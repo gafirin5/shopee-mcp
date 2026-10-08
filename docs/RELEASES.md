@@ -23,9 +23,11 @@ Scoped packages use **`"publishConfig": { "access": "public" }`**.
 
 ## Publishing (maintainers)
 
-Releases are **automated** by the [`release` workflow](../.github/workflows/release.yml): pushing a `vX.Y.Z` tag runs typecheck + build and publishes to npm (with [provenance](https://docs.npmjs.com/generating-provenance-statements)), then creates a GitHub release.
+Releases are **automated** by the [`release` workflow](../.github/workflows/release.yml): pushing a `vX.Y.Z` tag verifies the tag matches `package.json`, runs lint/format/typecheck/build, publishes to npm with [provenance](https://docs.npmjs.com/generating-provenance-statements), then creates a GitHub release.
 
-**One-time setup:** add an npm **automation token** as the repo secret **`NPM_TOKEN`**. Without it, the workflow still builds but skips publish.
+**One-time setup:** on npmjs.com, open the package → **Settings → Trusted Publisher** and register this GitHub repo plus `release.yml`. That uses npm **Trusted Publishing (OIDC)** — there is **no token** to create, store, or rotate. Until it is configured, the publish step fails (the build still runs).
+
+> **The tag must be a version npm does not have yet.** The workflow skips publishing when `package@version` already exists (so a re-tag is harmless), and that skip also means a forgotten version bump produces a GitHub release with **no** npm update. Bump `version` first, then tag.
 
 **To cut a release:**
 

@@ -10,16 +10,35 @@ For installing the package or cloning the repo, see **[Installation](../README.m
 
 All optional. Set them in your MCP client's **`env`** block, or copy `.env.example` to `.env` when developing from a checkout.
 
-| Variable               | Default                        | Description                                              |
-| ---------------------- | ------------------------------ | -------------------------------------------------------- |
-| `SHOPEE_DOMAIN`        | `shopee.co.id`                 | Regional Shopee domain.                                  |
-| `SHOPEE_LOCALE`        | _derived from domain_          | Browser locale override.                                 |
-| `SHOPEE_TIMEZONE`      | _derived from domain_          | Browser timezone override.                               |
-| `SHOPEE_PROFILE_DIR`   | `~/.shopee-mcp/chrome-profile` | Where the saved login lives.                             |
-| `SHOPEE_HEADLESS`      | `false`                        | Keep `false` — headless is detected.                     |
-| `SHOPEE_ACCOUNT_TOOLS` | `auto`                         | `auto`: account tools while logged in; `off`: read-only. |
-| `CACHE_TTL_MS`         | `30000`                        | In-memory cache lifetime.                                |
-| `DEBUG`                | `false`                        | Log startup/debug info to stderr.                        |
+Both realms (buyer marketplace and Seller Centre) share **one** browser profile:
+Shopee's wildcard-domain cookies SSO the portal in, so no separate login or
+profile directory is needed.
+
+| Variable                      | Default                        | Description                                                         |
+| ----------------------------- | ------------------------------ | ------------------------------------------------------------------- |
+| `SHOPEE_DOMAIN`               | `shopee.co.id`                 | Regional Shopee domain.                                             |
+| `SHOPEE_LOCALE`               | _derived from domain_          | Browser locale override.                                            |
+| `SHOPEE_TIMEZONE`             | _derived from domain_          | Browser timezone override.                                          |
+| `SHOPEE_PROFILE_DIR`          | `~/.shopee-mcp/chrome-profile` | Where the saved login lives.                                        |
+| `SHOPEE_HEADLESS`             | `false`                        | Keep `false` — headless is detected.                                |
+| `SHOPEE_ACCOUNT_TOOLS`        | `auto`                         | `auto`: account tools while logged in; `off`: read-only.            |
+| `SHOPEE_ENABLE_SELLER_WRITES` | `false`                        | Master switch for the seller-side write tools.                      |
+| `SHOPEE_READ_SPACING_MS`      | `3000`                         | Minimum spacing between reads (jitter adds `_SPREAD_MS`).           |
+| `SHOPEE_READ_SPREAD_MS`       | `3000`                         | Extra random spacing added to each read.                            |
+| `SHOPEE_WRITE_SPACING_MS`     | `60000`                        | Minimum spacing between writes.                                     |
+| `SHOPEE_WRITE_SPREAD_MS`      | `120000`                       | Extra random spacing added to each write.                           |
+| `SHOPEE_READ_MAX_PER_HOUR`    | `30`                           | Read budget per rolling hour.                                       |
+| `SHOPEE_WRITE_MAX_PER_HOUR`   | `10`                           | Write budget per rolling hour.                                      |
+| `SHOPEE_WRITE_MAX_PER_DAY`    | `30`                           | Write budget per calendar day.                                      |
+| `SHOPEE_COOLDOWN_MS`          | `600000`                       | Anti-bot circuit-breaker cooldown (10 min).                         |
+| `SHOPEE_ACTION_TIMEOUT_MS`    | `60000`                        | Per-step timeout for UI write actions.                              |
+| `SHOPEE_ACTION_DELAY_MS`      | `2000`                         | Politeness delay between UI steps inside a write action (jittered). |
+| `SHOPEE_VIDEO_MAX_MB`         | `200`                          | Refuse video uploads larger than this before touching the portal.   |
+| `CACHE_TTL_MS`                | `30000`                        | In-memory cache lifetime.                                           |
+| `DEBUG`                       | `false`                        | Log startup/debug info to stderr.                                   |
+
+The budgets above are the defaults; whatever you set is what `safety_status`
+reports and what the gate enforces.
 
 ### Locale and timezone
 

@@ -32,7 +32,7 @@ async function fillNumericField(
  */
 export async function updateProductPrice(args: NumericUpdateArgs): Promise<string> {
   const { itemId, value, variationIndex } = args;
-  if (value <= 0) throw new Error('Price must be a positive number (in IDR, no separators).');
+  if (value <= 0) throw new Error('Price must be a positive number (no separators).');
   return withSellerAction(
     'update-price',
     async (page: Page) => {
@@ -51,7 +51,7 @@ export async function updateProductPrice(args: NumericUpdateArgs): Promise<strin
       if (!saved) {
         throw new Error('Save clicked but no success toast appeared — verify on the edit page.');
       }
-      return `💰 Price for product ${itemId}${variationIndex !== undefined ? ` (variation ${variationIndex})` : ''} set to ${value.toLocaleString('id-ID')} and saved.`;
+      return `💰 Price for product ${itemId}${variationIndex !== undefined ? ` (variation ${variationIndex})` : ''} set to ${value.toLocaleString('en-US')} and saved.`;
     },
     `item ${itemId} price → ${value}`,
   );

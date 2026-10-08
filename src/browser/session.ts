@@ -11,10 +11,9 @@ export const DOMAIN = process.env.SHOPEE_DOMAIN || 'shopee.co.id';
 export const BASE_URL = `https://${DOMAIN}`;
 
 // The Seller Centre lives on its own subdomain with its own portal app. It is
-// still one Shopee account, so by default we reuse the same browser profile and
-// let Shopee's wildcard-domain cookies SSO us in — no second login needed.
-// Point SHOPEE_SELLER_PROFILE_DIR at a separate directory only if you want the
-// seller realm isolated in its own login.
+// still one Shopee account, so we reuse the same browser profile and let
+// Shopee's wildcard-domain cookies SSO us in — no second login, and no separate
+// profile directory to configure.
 export const SELLER_BASE_URL = `https://seller.${DOMAIN}`;
 
 // Shopee tailors its web app to the visitor's region, so the browser's locale and
