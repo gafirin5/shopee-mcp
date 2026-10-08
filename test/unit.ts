@@ -47,7 +47,14 @@ import {
 } from '../src/account-mode.js';
 import { buildVariantRows } from '../src/tools/variants.js';
 import { starBreakdown, formatReview } from '../src/tools/reviews.js';
-import { createSafetyGate, RateLimitError, CooldownError } from '../src/utils/rate-limit.js';
+import {
+  createSafetyGate,
+  configFromEnv,
+  RateLimitError,
+  CooldownError,
+} from '../src/utils/rate-limit.js';
+import { rowNamesProduct, idPattern } from '../src/seller/pages/productList.js';
+import { confirmGate } from '../src/utils/confirm.js';
 import { numericMatches } from '../src/seller/actions/product.js';
 import type { SearchItem, ItemBasic, PdpModel, PdpItem, Rating } from '../src/api/types.js';
 
@@ -1409,6 +1416,55 @@ test('findCartItem: by item, by item+model, and ambiguous multi-variant lines', 
   assert.equal(ambiguous.item, undefined);
   assert.equal(ambiguous.matches.length, 2);
   assert.equal(findCartItem(blocks, '3').matches.length, 0);
+});
+
+// ─── seller list matching + env parsing ─────────────────────────────────────
+
+test('rowNamesProduct: matches the id as a whole number only', () => {
+  // "777" must not match the row for "7777" — a substring test did, and toggled that row.
+  assert.equal(rowNamesProduct('Coffee cup · ID 7777 · Stok 8', '777'), false);
+  assert.equal(rowNamesProduct('Ceramic mug · ID 777 · Stok 6', '777'), true);
+  assert.equal(rowNamesProduct('Price 1777 · ID 777', '777'), true);
+  assert.equal(rowNamesProduct('Price 1777', '777'), false);
+  assert.equal(rowNamesProduct('ID: 777, Stok 6', '777'), true);
+});
+
+test('rowNamesProduct: a non-numeric or empty id matches nothing', () => {
+  assert.equal(rowNamesProduct('ID 777', ''), false);
+  assert.equal(rowNamesProduct('ID 777', 'abc'), false);
+  assert.equal(idPattern('12 3'), null);
+  assert.equal(idPattern('-1'), null);
+});
+
+test('configFromEnv: 0 is a real value; unset or negative falls back to the default', () => {
+  const keys = ['SHOPEE_WRITE_SPACING_MS', 'SHOPEE_WRITE_MAX_PER_HOUR', 'SHOPEE_READ_SPREAD_MS'];
+  const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+  try {
+    process.env.SHOPEE_WRITE_SPACING_MS = '0';
+    process.env.SHOPEE_WRITE_MAX_PER_HOUR = '0';
+    process.env.SHOPEE_READ_SPREAD_MS = '-5';
+    const cfg = configFromEnv();
+    assert.equal(cfg.writeSpacingMs, 0, 'an explicit 0 must not be replaced by the 60 s default');
+    assert.equal(cfg.writeMaxPerHour, 0, 'a closed budget (0) must be honoured');
+    assert.equal(cfg.readSpreadMs, 3000, 'a negative value falls back to the default');
+
+    process.env.SHOPEE_WRITE_SPACING_MS = 'soon';
+    assert.equal(configFromEnv().writeSpacingMs, 60_000, 'non-numeric input falls back');
+  } finally {
+    for (const k of keys) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  }
+});
+
+test('confirmGate: without confirm:true it previews and returns, executing nothing', () => {
+  const preview = confirmGate(undefined, 'Set price of product `1001`');
+  assert.ok(preview, 'no confirm must return a preview');
+  assert.match(preview.content[0].text, /WRITE PREVIEW — nothing executed yet/);
+  assert.match(preview.content[0].text, /Set price of product `1001`/);
+  assert.ok(confirmGate(false, 'p'), 'confirm:false must also preview');
+  assert.equal(confirmGate(true, 'p'), null, 'confirm:true must let the action run');
 });
 
 await runTests();

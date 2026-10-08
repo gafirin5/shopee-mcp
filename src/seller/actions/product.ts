@@ -6,7 +6,7 @@ import {
   getStockInputs,
   saveProduct,
 } from '../pages/productEdit.js';
-import { openProductList, findRowSwitch } from '../pages/productList.js';
+import { openProductList, findRowSwitch, confirmDialogIfAsked } from '../pages/productList.js';
 
 interface NumericUpdateArgs {
   itemId: string;
@@ -175,22 +175,21 @@ export async function setItemListing(itemId: string, list: boolean): Promise<str
     const sw = await findRowSwitch(page, itemId);
 
     const state = await sw.getAttribute('aria-checked').catch(() => null);
-    if (state !== null) {
-      const isOn = state === 'true';
-      if (isOn === list) {
-        return `ℹ️ Product ${itemId} is already ${list ? 'listed (on sale)' : 'unlisted'} — nothing to do.`;
-      }
+    if (state !== 'true' && state !== 'false') {
+      // Without a readable state we cannot tell a list from an unlist, and a blind
+      // click can undo the change the caller asked for. Refuse instead.
+      throw new Error(
+        `Cannot read whether product ${itemId} is on sale — its switch exposes no aria-checked state. ` +
+          'Nothing was clicked; check the row in Seller Centre.',
+      );
+    }
+    if ((state === 'true') === list) {
+      return `ℹ️ Product ${itemId} is already ${list ? 'listed (on sale)' : 'unlisted'} — nothing to do.`;
     }
     await sw.click();
     await page.waitForTimeout(800);
-    // The portal may ask for confirmation on unlist.
-    const confirm = page
-      .locator('button:has-text("Ya"), button:has-text("OK"), button:has-text("Konfirmasi")')
-      .first();
-    if (await confirm.isVisible().catch(() => false)) {
-      await confirm.click();
-      await page.waitForTimeout(500);
-    }
+    // Unlisting may open a confirmation dialog; listing does not.
+    if (await confirmDialogIfAsked(page)) await page.waitForTimeout(500);
 
     // Re-read the switch (the row re-renders after the toggle) so the reply
     // reports the real state instead of assuming the click worked.

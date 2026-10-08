@@ -56,12 +56,16 @@ export const DEFAULT_SAFETY: SafetyConfig = {
   cooldownMs: 10 * 60_000,
 };
 
+/**
+ * Integer from the environment. 0 is a real setting (spacing off, a closed
+ * budget); only unset, non-numeric or negative input falls back to the default.
+ */
 function envInt(name: string, fallback: number): number {
   const v = parseInt(process.env[name] ?? '', 10);
-  return Number.isFinite(v) && v > 0 ? v : fallback;
+  return Number.isFinite(v) && v >= 0 ? v : fallback;
 }
 
-function configFromEnv(): SafetyConfig {
+export function configFromEnv(): SafetyConfig {
   return {
     readSpacingMs: envInt('SHOPEE_READ_SPACING_MS', DEFAULT_SAFETY.readSpacingMs),
     readSpreadMs: envInt('SHOPEE_READ_SPREAD_MS', DEFAULT_SAFETY.readSpreadMs),

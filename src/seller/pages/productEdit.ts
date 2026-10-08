@@ -1,6 +1,6 @@
 import type { Locator, Page } from 'playwright';
 import { ACTION_TIMEOUT_MS } from '../../actions/base.js';
-import { SELLER_PATHS } from '../urls.js';
+import { SELLER_PATHS, sellerUrl } from '../urls.js';
 
 /**
  * Selectors for the Seller Centre product edit page (Media section).
@@ -36,7 +36,8 @@ export const SEL = {
 
 /** Open the product edit page for a marketplace itemid. */
 export async function openProductEdit(page: Page, itemId: string): Promise<void> {
-  await page.goto(`${SELLER_PATHS.productEdit(itemId)}`, {
+  // Absolute on purpose — see openProductList: a bare path cannot be navigated to.
+  await page.goto(sellerUrl(SELLER_PATHS.productEdit(itemId)), {
     waitUntil: 'domcontentloaded',
     timeout: ACTION_TIMEOUT_MS,
   });
