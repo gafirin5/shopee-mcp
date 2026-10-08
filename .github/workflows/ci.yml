@@ -26,7 +26,12 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - run: npm run test:unit
+      # Registry check: builds the real MCP server and lists its tools, so a
+      # duplicate/invalid tool registration (which takes the server down at
+      # startup) fails CI instead of shipping.
+      - run: npm run test:tools
 
 # Note: `npm test` (test/smoke.ts) is a LIVE smoke test that needs a logged-in
 # browser session and a display, so it is not run in CI — run it locally after
-# `npm run login`. `npm run test:unit` (test/unit.ts) is offline and runs above.
+# `npm run login`. `npm run test:unit` (test/unit.ts) and `npm run test:tools`
+# (test/tools.ts) are both offline and run above.

@@ -1,7 +1,7 @@
 {
   "name": "@bintangtimurlangit/shopee-mcp",
   "version": "0.3.0",
-  "description": "An MCP server for exploring Shopee — product search and prices via an authenticated browser session. Discovery only, no seller features.",
+  "description": "An MCP server for exploring Shopee — product search, prices, reviews and shop data via an authenticated browser session — plus a Seller Centre realm for reading and acting on your own shop.",
   "author": "bintangtimurlangit",
   "license": "MIT",
   "type": "module",
@@ -36,6 +36,7 @@
     "format:check": "prettier --check .",
     "test": "tsx test/smoke.ts",
     "test:unit": "tsx test/unit.ts",
+    "test:tools": "tsx test/tools.ts",
     "prepare": "husky",
     "prepublishOnly": "npm run build"
   },
@@ -61,7 +62,8 @@
     "ecommerce",
     "marketplace",
     "product-search",
-    "discovery"
+    "discovery",
+    "seller-centre"
   ],
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
