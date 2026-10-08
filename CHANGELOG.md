@@ -14,6 +14,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Ver
 - **Buyer extras**: `get_shop_products`, `search_shops`, video info in `get_product_detail`, `check_product_video`, `shopee_video_probe`, `compare_prices`.
 - `test/tools.ts` (`npm run test:tools`): offline registry test that builds the real server and lists its tools; wired into CI.
 - `npm run typecheck` now also checks `test/` (via `tsconfig.test.json`); it previously compiled only `src/`, and two test doubles had quietly drifted from the real `CaptureFn` shape.
+- `test/seller-browser.ts` (`npm run test:browser`): runs the seller write actions in a real Chromium against a local fixture of the Seller Centre, served by route interception on a test host (every other host is aborted, and HOME is a throwaway directory). It covers price/stock writes, variation refusal, redirect abort, unverified saves, listing toggles, look-alike buttons, audit entries and the request counter. It needs `CLOAKBROWSER_BINARY_PATH` and skips otherwise.
 
 ### Changed
 
@@ -25,6 +26,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Ver
 
 ### Fixed
 
+- **Seller write actions could not run at all.** `update_price`, `update_stock`, `list_item`/`unlist_item` and the product-video actions opened the Seller Centre edit or list page with a bare path, which Playwright rejects (`Cannot navigate to invalid URL`) before any step ran. They now use the absolute URL, like the other seller pages. The new browser suite found this; no earlier check executed those paths.
+- **List/unlist could toggle the wrong product or click the wrong button.** The row match was a substring test (`777` matched the row for `7777`); the confirmation step clicked any visible button whose text contained "ya" or "ok" (e.g. "Layanan"), even outside a dialog; and a switch with no readable on/off state was clicked anyway. The id now matches as a whole number, confirmation is only looked for inside a dialog by exact label, and an unreadable state is refused with nothing clicked.
+- **List/unlist finds its switch under CloakBrowser's humanized actions.** Chained locators and `getByRole` are rejected there, so the lookup failed in the real browser even once the navigation was fixed; it now uses one CSS selector per element.
+- **`0` is a valid value for `SHOPEE_*_SPACING_MS`, `SHOPEE_*_SPREAD_MS` and the `SHOPEE_*_MAX_*` budgets.** It was silently replaced by the default, so `SHOPEE_WRITE_SPACING_MS=0` still waited 60–120 s between writes.
 - **The server failed to start** with `Fatal error: Error: Tool get_product_reviews is already registered` — the tool was registered twice (an older copy in `research.ts` alongside the real one in `reviews.ts`) and `server.tool()` throws on a duplicate name. The duplicate is gone and `npm run test:tools` now fails CI if it ever returns.
 - `compare_prices` read `name`/`price`/`price_min` from the top level of the PDP response (the payload is nested under `data.item` / `data.product_price`), so every listing printed `?`; it also hardcoded `Rp` and Indonesian number formatting for all regions. It now reads the real fields, renders prices in the storefront currency, and fails fast with the login prompt when signed out.
 - `safety_status` printed hardcoded budgets (`/30`, `/10`, `/30`) that ignored `SHOPEE_*_MAX_*` overrides; it now reports the limits the gate actually enforces.
