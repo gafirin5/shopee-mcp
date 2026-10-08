@@ -6,6 +6,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Ver
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-09
 ### Added
 
 - **Seller Centre realm** (unreleased): portal reads — `check_seller_login`, `get_seller_shop_info`, `get_seller_income`, `get_seller_analytics`, `get_seller_marketing`, `list_orders`, `get_seller_order_detail`, `list_seller_products`, `seller_api_probe` — plus write actions on your own shop: `update_price`, `update_stock`, `list_item` / `unlist_item`, `upload_product_video` / `remove_product_video`, `send_chat_reply`, `post_shopee_video`. All writes sit behind `SHOPEE_ENABLE_SELLER_WRITES`, `confirm: true`, the rate-limit gate, and the audit log.
@@ -14,10 +15,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Ver
 - **Buyer extras**: `get_shop_products`, `search_shops`, video info in `get_product_detail`, `check_product_video`, `shopee_video_probe`, `compare_prices`.
 - `test/tools.ts` (`npm run test:tools`): offline registry test that builds the real server and lists its tools; wired into CI.
 - `npm run typecheck` now also checks `test/` (via `tsconfig.test.json`); it previously compiled only `src/`, and two test doubles had quietly drifted from the real `CaptureFn` shape.
-- `test/seller-browser.ts` (`npm run test:browser`): runs the seller write actions in a real Chromium against a local fixture of the Seller Centre, served by route interception on a test host (every other host is aborted, and HOME is a throwaway directory). It covers price/stock writes, variation refusal, redirect abort, unverified saves, listing toggles, look-alike buttons, audit entries and the request counter. It needs `CLOAKBROWSER_BINARY_PATH` and skips otherwise.
+- `test/seller-browser.ts` (`npm run test:browser`): runs the seller write actions in a real Chromium against a local fixture of the Seller Centre, served by route interception on a test host (every other host is aborted, and HOME is a throwaway directory). It covers price/stock writes, variation refusal, redirect abort, unverified saves, the exact Save label, saves without a toast, listing toggles, look-alike buttons, audit entries, account-write metering and the request counter. It needs `CLOAKBROWSER_BINARY_PATH` and skips otherwise.
 
 ### Changed
 
+- **Breaking: `like_product`, `follow_shop`, `add_to_cart` and `update_cart_item` require `confirm: true`.** Like `claim_shop_voucher`, they return a preview and change nothing unless called with `confirm: true`. A client that called them directly must now pass `confirm: true` once the user has approved the preview.
+- **The release workflow stops when the version is already on npm.** It used to print a notice and still create a GitHub release with no npm update. It now fails before publishing, so bump `version` before tagging (see `docs/RELEASES.md`).
+- **zod 4 changes the advertised input schemas.** `tools/list` no longer sets `additionalProperties: false` on tool inputs, and the `get_product_reviews` `filter` values are listed in a different order. Unknown arguments are still dropped rather than rejected.
+- Dependencies: in-range updates (Playwright 1.64, ESLint 10.12, `@types/node` 24.19 and others) and `dotenv` 18. TypeScript stays on 5.9, because `typescript-eslint` does not support TypeScript 7 yet.
 - **Seller price/stock edits can no longer silently touch the wrong row.** `update_price` and `update_stock` now refuse to edit a variation listing unless `variation_index` says which row (they previously edited the first one), verify the typed value before Save, and re-read the edit page afterwards to report whether Shopee really stored it. A redirect to a different product aborts the action.
 - **`claim_shop_voucher` requires `confirm: true`** — a claim cannot be undone, so it now uses the same preview-then-execute gate as the Seller Centre writes.
 - **The safety gate counts requests, not just operations.** Every `/api/vN/…` response the browser makes is tallied; `safety_status` reports the rolling-hour total, and `SHOPEE_API_REQUESTS_MAX_PER_HOUR` (unset by default) turns that into a real cap — one operation can be a dozen requests.
@@ -26,6 +31,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Ver
 
 ### Fixed
 
+- **A Save click could press the wrong button.** The Save button was matched by substring, so "Simpan Draf" (save as draft) could be pressed instead of "Simpan". It now matches the exact label, and an action refuses, with nothing clicked, when no exact Save button is showing.
+- **A save that worked could be reported as failed.** `update_price` and `update_stock` required a success toast, so a save that stored the value but showed no toast was reported as an error. The fresh re-read now decides; the toast is advisory.
+- **Account writes were counted as reads and never audited.** `like_product`, `follow_shop`, `claim_shop_voucher`, `add_to_cart` and `update_cart_item` used the read path, so they skipped the write budget and spacing and left no `audit.log` entry. They now count as writes and are audited. An audit `ok` means the browser step finished without an error; the tool's reply carries the business outcome.
 - **Seller write actions could not run at all.** `update_price`, `update_stock`, `list_item`/`unlist_item` and the product-video actions opened the Seller Centre edit or list page with a bare path, which Playwright rejects (`Cannot navigate to invalid URL`) before any step ran. They now use the absolute URL, like the other seller pages. The new browser suite found this; no earlier check executed those paths.
 - **List/unlist could toggle the wrong product or click the wrong button.** The row match was a substring test (`777` matched the row for `7777`); the confirmation step clicked any visible button whose text contained "ya" or "ok" (e.g. "Layanan"), even outside a dialog; and a switch with no readable on/off state was clicked anyway. The id now matches as a whole number, confirmation is only looked for inside a dialog by exact label, and an unreadable state is refused with nothing clicked.
 - **List/unlist finds its switch under CloakBrowser's humanized actions.** Chained locators and `getByRole` are rejected there, so the lookup failed in the real browser even once the navigation was fixed; it now uses one CSS selector per element.
@@ -101,7 +109,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Ver
 - **2 tools:** `search_products` (keyword search with sorting & pagination) and `get_product_detail` (price, discount, brand, condition, rating, review/sold counts, stock, location, description).
 - In-memory read cache and a persistent browser profile under `~/.shopee-mcp/`.
 
-[Unreleased]: https://github.com/bintangtimurlangit/shopee-mcp/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/bintangtimurlangit/shopee-mcp/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/bintangtimurlangit/shopee-mcp/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/bintangtimurlangit/shopee-mcp/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/bintangtimurlangit/shopee-mcp/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/bintangtimurlangit/shopee-mcp/compare/v0.1.0...v0.1.1

@@ -1,6 +1,6 @@
 {
   "name": "@bintangtimurlangit/shopee-mcp",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "An MCP server for exploring Shopee — product search, prices, reviews and shop data via an authenticated browser session — plus a Seller Centre realm for reading and acting on your own shop.",
   "author": "bintangtimurlangit",
   "license": "MIT",
