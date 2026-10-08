@@ -21,6 +21,8 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { BrowserContext, Request, Route } from 'playwright';
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { z } from 'zod';
 
 const BINARY = process.env.CLOAKBROWSER_BINARY_PATH;
 if (!BINARY) {
@@ -42,6 +44,7 @@ Object.assign(process.env, {
   SHOPEE_ACTION_DELAY_MS: '0',
   // The production defaults pace writes a minute apart; a fixture run needs none of that.
   SHOPEE_READ_SPACING_MS: '0',
+  SHOPEE_READ_MAX_PER_HOUR: '1000',
   SHOPEE_READ_SPREAD_MS: '0',
   SHOPEE_WRITE_SPACING_MS: '0',
   SHOPEE_WRITE_SPREAD_MS: '0',
@@ -53,6 +56,8 @@ const { getContext, getSellerPage, safetyStatus, closeContext, captureAll, captu
   await import('../src/browser/session.js');
 const { updateProductPrice, updateProductStock, setItemListing } =
   await import('../src/seller/actions/product.js');
+const { uploadProductVideo, removeProductVideo } = await import('../src/seller/actions/video.js');
+const { registerSellerChatTools } = await import('../src/tools/seller/chat.js');
 
 const FIXTURE_HOST = 'seller.shopee.test';
 const BUYER_HOST = 'shopee.test';
@@ -80,6 +85,18 @@ interface Listing {
   noToast?: boolean;
   /** The edit page has a "Simpan Draf" button and no exact "Simpan" button. */
   onlyDraftSave?: boolean;
+  /** The product already has a video attached. */
+  video?: 'ready' | 'processing';
+  /** How an upload behaves: processing time, whether the preview shows before processing ends, or never ends. */
+  videoUpload?: { processMs?: number; previewEarly?: boolean; stuck?: boolean };
+  /** The edit page has an image uploader but no video input. */
+  noVideoInput?: boolean;
+  /** A no-op control sits before the real delete button, so a selector that takes the first match picks it. */
+  videoDeleteDecoy?: boolean;
+  /** Once the product is saved, the edit page stops rendering (a 500), as if the reload failed. */
+  breakOnReloadAfterSave?: boolean;
+  /** Set by the save above: the edit page now returns a 500. */
+  reloadBroken?: boolean;
 }
 
 const PRISTINE: Record<string, Listing> = {
@@ -97,12 +114,29 @@ const PRISTINE: Record<string, Listing> = {
   '9999': { name: 'Water bottle', price: [50000], stock: [9], listed: true },
 };
 
+interface ChatThread {
+  id: string;
+  buyer: string;
+  messages: string[];
+}
+
+// Listed with the longer name first on purpose: a substring match on "Budi" opens this row first.
+const PRISTINE_CHATS: ChatThread[] = [
+  { id: 'c2', buyer: 'Budi Santoso', messages: ['Mau tanya ongkir ke Bandung'] },
+  { id: 'c1', buyer: 'Budi', messages: ['Halo kak, stok ready?'] },
+];
+
 const portal = {
   products: structuredClone(PRISTINE),
   saves: [] as string[],
   toggles: [] as string[],
   decoyClicks: 0,
   draftClicks: 0,
+  imageUploads: 0,
+  videoDecoyClicks: 0,
+  chats: structuredClone(PRISTINE_CHATS),
+  chatSends: [] as Array<{ chat: string; text: string }>,
+  chatDropReplies: false,
 };
 
 function resetPortal(): void {
@@ -111,6 +145,11 @@ function resetPortal(): void {
   portal.toggles = [];
   portal.decoyClicks = 0;
   portal.draftClicks = 0;
+  portal.imageUploads = 0;
+  portal.videoDecoyClicks = 0;
+  portal.chats = structuredClone(PRISTINE_CHATS);
+  portal.chatSends = [];
+  portal.chatDropReplies = false;
 }
 
 const LIST_SCRIPT = String.raw`
@@ -151,9 +190,54 @@ document.querySelectorAll('input').forEach((inp) => {
   });
 });
 const read = (kind) => [...document.querySelectorAll('input[data-kind="' + kind + '"]')].map((i) => Number(digits(i.value)));
+const uploadCfg = JSON.parse(document.body.dataset.videoUpload || '{}');
+let videoState = document.body.dataset.video || null;
+let uploading = null;
+const videoHost = document.getElementById('video-host');
+function renderVideo() {
+  if (!videoHost) return;
+  if (!videoState && !uploading) {
+    videoHost.innerHTML = '';
+    return;
+  }
+  const showProgress = (uploading && uploading.progress) || videoState === 'processing';
+  const showPreview = videoState === 'ready' || (uploading && uploading.preview);
+  videoHost.innerHTML =
+    '<div class="video-tile">' +
+    (showProgress ? '<div class="upload-progress" role="progressbar" aria-valuenow="40">40%</div>' : '') +
+    (showPreview ? '<video src="/media/clip.mp4" width="200" height="120"></video>' : '') +
+    (document.body.dataset.videoDecoy ? '<button class="video-close-hint" type="button">Tutup</button>' : '') +
+    '<button class="video-delete" type="button" aria-label="Hapus video">x</button>' +
+    '</div>';
+  videoHost.querySelector('.video-delete').addEventListener('click', () => {
+    videoState = null;
+    uploading = null;
+    renderVideo();
+  });
+  const decoy = videoHost.querySelector('.video-close-hint');
+  if (decoy) decoy.addEventListener('click', () => fetch('/__video-decoy', { method: 'POST' }));
+}
+const videoInput = document.getElementById('video-input');
+if (videoInput) videoInput.addEventListener('change', () => {
+  if (!videoInput.files || !videoInput.files.length) return;
+  videoState = 'processing';
+  uploading = { progress: true, preview: !!uploadCfg.previewEarly };
+  renderVideo();
+  if (uploadCfg.stuck) return;
+  setTimeout(() => {
+    uploading = null;
+    videoState = 'ready';
+    renderVideo();
+  }, uploadCfg.processMs || 0);
+});
+const imageInput = document.getElementById('image-input');
+if (imageInput) imageInput.addEventListener('change', () => {
+  if (imageInput.files && imageInput.files.length) fetch('/__image-upload', { method: 'POST' });
+});
+renderVideo();
 const saveBtn = document.getElementById('save-btn');
 if (saveBtn) saveBtn.addEventListener('click', async () => {
-  await fetch('/__save', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: PID, price: read('price'), stock: read('stock') }) });
+  await fetch('/__save', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: PID, price: read('price'), stock: read('stock'), video: videoState }) });
   if (!document.body.dataset.noToast) document.getElementById('toast').style.display = 'block';
 });
 `;
@@ -206,17 +290,89 @@ function editPage(id: string, p: Listing): string {
   // Listed before the real Save on purpose: a substring match on "Simpan" picks this one first.
   const draft = `<button id="draft-btn" type="button" onclick="fetch('/__draft', { method: 'POST' })">Simpan Draf</button>`;
   const save = p.onlyDraftSave ? '' : `<button id="save-btn" type="button">Simpan</button>`;
+  const videoInput = p.noVideoInput
+    ? ''
+    : '<input type="file" id="video-input" accept="video/mp4,.mov">';
   return `<!doctype html><html><head><meta charset="utf-8"><title>Edit ${id}</title></head><body data-pid="${id}"${
     p.noToast ? ' data-no-toast="1"' : ''
-  }>
+  }${videoBodyAttrs(p)}>
 <h1>${p.name}</h1>
 ${landing}
+<section class="image-section"><input type="file" id="image-input" accept="image/*"></section>
+<section class="video-section">${videoInput}<div id="video-host"></div></section>
 <section class="price-section">${price}</section>
 <section class="stock-section">${stock}</section>
 ${draft}
 ${save}
 <div id="toast" class="toast" style="display:none">Berhasil disimpan</div>
 <script>${EDIT_SCRIPT}</script>
+</body></html>`;
+}
+
+/** Body attributes that tell the edit page's upload stub how to behave (see EDIT_SCRIPT). */
+function videoBodyAttrs(p: Listing): string {
+  return [
+    p.video ? ` data-video="${p.video}"` : '',
+    ` data-video-upload='${JSON.stringify(p.videoUpload ?? {})}'`,
+    p.videoDeleteDecoy ? ' data-video-decoy="1"' : '',
+  ].join('');
+}
+
+const CHAT_SCRIPT = String.raw`
+let openId = null;
+const composer = document.getElementById('composer');
+const thread = document.getElementById('thread');
+function bubble(kind, text) {
+  const el = document.createElement('div');
+  el.className = 'message-item ' + kind;
+  el.textContent = text;
+  thread.appendChild(el);
+}
+function openChat(id) {
+  openId = id;
+  const c = CHATS.find((x) => x.id === id);
+  thread.innerHTML = '';
+  c.messages.forEach((m) => bubble('incoming', m));
+}
+function send() {
+  const text = composer.innerText.trim();
+  if (!openId || !text) return;
+  if (DROP) {
+    bubble('incoming', 'Terima kasih kak');
+    return;
+  }
+  fetch('/__chat-send', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ chat: openId, text: text }) });
+  bubble('outgoing', text);
+  composer.innerText = '';
+}
+composer.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    send();
+  }
+});
+document.getElementById('send').addEventListener('click', send);
+document.querySelectorAll('.conversation-item').forEach((el) => {
+  el.addEventListener('click', () => openChat(el.dataset.chat));
+});
+`;
+
+/** The seller chat app: a conversation list, a thread, and a composer that sends on Enter. */
+function chatPage(): string {
+  const items = portal.chats
+    .map(
+      (c) =>
+        `<div class="conversation-item" data-chat="${c.id}"><span class="buyer">${c.buyer}</span></div>`,
+    )
+    .join('\n');
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Chat</title><style>.conversation-item { display: block; width: 260px; height: 44px; cursor: pointer; } .message-item { display: block; width: 300px; min-height: 20px; } .input-box { display: block; width: 300px; height: 40px; border: 1px solid #999; } .send-btn { display: inline-block; width: 80px; height: 30px; }</style></head><body>
+<div class="conversation-list">
+${items}
+</div>
+<div class="thread" id="thread"></div>
+<div class="composer"><div class="input-box" id="composer" contenteditable="true"></div><button class="send-btn" id="send" type="button">Kirim</button></div>
+<script>const CHATS = ${JSON.stringify(portal.chats)}; const DROP = ${portal.chatDropReplies ? 'true' : 'false'};</script>
+<script>${CHAT_SCRIPT}</script>
 </body></html>`;
 }
 
@@ -238,12 +394,16 @@ async function routeSeller(route: Route, req: Request): Promise<void> {
       id: string;
       price: number[];
       stock: number[];
+      video?: string | null;
     };
     portal.saves.push(body.id);
     const item = portal.products[body.id];
+    if (item?.breakOnReloadAfterSave) item.reloadBroken = true;
     if (item && !item.saveDrops) {
       item.price = body.price;
       item.stock = body.stock;
+      if (body.video === 'ready' || body.video === 'processing') item.video = body.video;
+      else delete item.video;
     }
     return reply(route, 200, '{"ok":true}', 'application/json');
   }
@@ -257,6 +417,20 @@ async function routeSeller(route: Route, req: Request): Promise<void> {
     portal.decoyClicks++;
     return reply(route, 200, '{}', 'application/json');
   }
+  if (p === '/__image-upload') {
+    portal.imageUploads++;
+    return reply(route, 200, '{}', 'application/json');
+  }
+  if (p === '/__video-decoy') {
+    portal.videoDecoyClicks++;
+    return reply(route, 200, '{}', 'application/json');
+  }
+  if (p === '/__chat-send') {
+    const body = JSON.parse(req.postData() ?? '{}') as { chat: string; text: string };
+    portal.chatSends.push(body);
+    return reply(route, 200, '{}', 'application/json');
+  }
+  if (p === '/portal/chat-management') return reply(route, 200, chatPage());
   if (p === '/__draft') {
     portal.draftClicks++;
     return reply(route, 200, '{}', 'application/json');
@@ -268,6 +442,12 @@ async function routeSeller(route: Route, req: Request): Promise<void> {
   if (m) {
     const item = portal.products[m[1]];
     if (!item) return reply(route, 404, 'not found');
+    if (item.reloadBroken)
+      return reply(
+        route,
+        500,
+        '<!doctype html><html><body><h1>Service unavailable</h1></body></html>',
+      );
     return reply(route, 200, editPage(m[1], item));
   }
   return reply(route, 404, 'not found');
@@ -314,6 +494,44 @@ async function readAudit(): Promise<
 }
 
 // ─── Checks ───────────────────────────────────────────────────────────────────
+
+type ToolResult = { content: Array<{ type: 'text'; text: string }> };
+type ToolHandler = (args: Record<string, unknown>) => Promise<ToolResult>;
+
+/** Collect the handlers a register function declares, the way the SDK would see them. */
+function recordTools(
+  register: (server: McpServer) => void,
+): Map<string, { shape: Record<string, unknown>; handler: ToolHandler }> {
+  const found = new Map<string, { shape: Record<string, unknown>; handler: ToolHandler }>();
+  const fake = {
+    tool(
+      name: string,
+      _description: string,
+      shape: Record<string, unknown>,
+      _annotations: unknown,
+      handler: ToolHandler,
+    ) {
+      found.set(name, { shape, handler });
+      return { enabled: true };
+    },
+  };
+  register(fake as unknown as McpServer);
+  return found;
+}
+
+const chatTools = recordTools(registerSellerChatTools);
+
+/** Call a tool the way the SDK does: arguments are parsed with its shape first, so defaults apply. */
+async function callTool(name: string, args: Record<string, unknown>): Promise<string> {
+  const tool = chatTools.get(name);
+  assert.ok(tool, `${name} should be registered`);
+  const parsed = z.object(tool.shape as Record<string, z.ZodType>).parse(args);
+  const result = await tool.handler(parsed);
+  return result.content[0].text;
+}
+
+/** A small file for the upload checks to point at. Its contents are never read. */
+const VIDEO_FILE = path.join(HOME, 'clip.mp4');
 
 const checks: Array<{ name: string; run: () => Promise<void> }> = [];
 const check = (name: string, run: () => Promise<void>): void => {
@@ -507,6 +725,195 @@ check('a read capture does not spend the write budget', async () => {
   assert.equal(safetyStatus().writesLastHour, before);
 });
 
+// Video: upload and remove a product's video through the edit page.
+
+check('upload: attaches the video, waits for it, saves, and the saved video is ready', async () => {
+  const out = await uploadProductVideo({ itemId: '1001', videoPath: VIDEO_FILE });
+  assert.match(out, /Saved/);
+  assert.equal(portal.products['1001'].video, 'ready');
+  assert.deepEqual(portal.saves, ['1001']);
+});
+
+check('upload: a video still processing is not saved as if it were ready', async () => {
+  // The preview appears before processing ends, so only the progress bar says "not yet".
+  portal.products['1001'].videoUpload = { processMs: 3000, previewEarly: true };
+  await uploadProductVideo({ itemId: '1001', videoPath: VIDEO_FILE, processTimeoutMs: 60000 });
+  assert.equal(portal.products['1001'].video, 'ready');
+});
+
+check('upload: a video that never finishes processing is refused and not saved', async () => {
+  portal.products['1001'].videoUpload = { stuck: true, previewEarly: true };
+  await assert.rejects(
+    uploadProductVideo({ itemId: '1001', videoPath: VIDEO_FILE, processTimeoutMs: 4000 }),
+    /did not finish processing/,
+  );
+  assert.deepEqual(portal.saves, []);
+});
+
+check(
+  'upload: with only an image uploader on the page, the video is refused, not sent to it',
+  async () => {
+    portal.products['1001'].noVideoInput = true;
+    await assert.rejects(
+      uploadProductVideo({ itemId: '1001', videoPath: VIDEO_FILE, processTimeoutMs: 4000 }),
+      /No video file input found/,
+    );
+    assert.equal(portal.imageUploads, 0, 'the video must not be attached to the image uploader');
+    assert.deepEqual(portal.saves, []);
+  },
+);
+
+check('remove: deletes the video, saves, and the reloaded page confirms it is gone', async () => {
+  portal.products['1001'].video = 'ready';
+  const out = await removeProductVideo({ itemId: '1001' });
+  assert.match(out, /Video deleted and product 1001 saved/);
+  assert.equal(portal.products['1001'].video, undefined);
+});
+
+check('remove: a control that deletes nothing is not reported as a deletion', async () => {
+  portal.products['1001'].video = 'ready';
+  portal.products['1001'].videoDeleteDecoy = true;
+  await assert.rejects(removeProductVideo({ itemId: '1001' }), /still attached/);
+  assert.equal(portal.videoDecoyClicks, 1);
+  assert.equal(portal.products['1001'].video, 'ready');
+});
+
+check(
+  'remove: if the edit page does not render after saving, the removal is not reported as confirmed',
+  async () => {
+    portal.products['1001'].video = 'ready';
+    portal.products['1001'].breakOnReloadAfterSave = true;
+    await assert.rejects(removeProductVideo({ itemId: '1001' }), /could not be checked/);
+    assert.deepEqual(portal.saves, ['1001']);
+  },
+);
+
+check('remove: a product with no video says so and saves nothing', async () => {
+  await assert.rejects(removeProductVideo({ itemId: '1001' }), /No video delete control found/);
+  assert.deepEqual(portal.saves, []);
+});
+
+check('upload: a file that is not MP4 or MOV is refused before the browser is used', async () => {
+  const wrong = path.join(HOME, 'clip.avi');
+  await fs.writeFile(wrong, Buffer.alloc(16));
+  await assert.rejects(
+    uploadProductVideo({ itemId: '1001', videoPath: wrong }),
+    /Unsupported video extension/,
+  );
+  assert.deepEqual(portal.saves, []);
+});
+
+// Chat: read a thread and send a reply through the seller chat app.
+
+check('read_chat: reading a thread does not spend the write budget', async () => {
+  const before = safetyStatus().writesLastHour;
+  const out = await callTool('read_chat', { match: 'Budi' });
+  assert.match(out, /Thread/);
+  assert.equal(safetyStatus().writesLastHour, before, 'a read must not count as a write');
+});
+
+check('read_chat: a name that is part of another buyer’s name opens the exact buyer', async () => {
+  const out = await callTool('read_chat', { match: 'Budi' });
+  assert.match(out, /Halo kak, stok ready\?/);
+  assert.doesNotMatch(out, /ongkir/);
+});
+
+check(
+  'send_chat_reply: sends to the exact buyer, not the first name containing the match',
+  async () => {
+    const out = await callTool('send_chat_reply', {
+      match: 'Budi',
+      message: 'Stok ready kak',
+      confirm: true,
+    });
+    assert.match(out, /Reply sent to "Budi"/);
+    assert.deepEqual(portal.chatSends, [{ chat: 'c1', text: 'Stok ready kak' }]);
+  },
+);
+
+check('send_chat_reply: two buyers with the same name are not guessed between', async () => {
+  portal.chats = [
+    { id: 's1', buyer: 'Sari', messages: ['Halo'] },
+    { id: 's2', buyer: 'Sari', messages: ['Pesan lain'] },
+  ];
+  const out = await callTool('send_chat_reply', {
+    match: 'Sari',
+    message: 'Halo juga',
+    confirm: true,
+  });
+  assert.match(out, /2 conversations match "Sari"/);
+  assert.deepEqual(portal.chatSends, []);
+});
+
+check(
+  'send_chat_reply: a reply is reported as sent only when its text shows in the thread',
+  async () => {
+    portal.chatDropReplies = true;
+    const out = await callTool('send_chat_reply', {
+      match: 'Budi Santoso',
+      message: 'Stok ready kak',
+      confirm: true,
+    });
+    assert.doesNotMatch(out, /Reply sent/);
+    assert.match(out, /verify/);
+    assert.deepEqual(portal.chatSends, []);
+  },
+);
+
+check('send_chat_reply: a multi-line reply is refused, not sent line by line', async () => {
+  const out = await callTool('send_chat_reply', {
+    match: 'Budi Santoso',
+    message: 'Halo\nSaya bantu',
+    confirm: true,
+  });
+  assert.match(out, /one line/);
+  assert.deepEqual(portal.chatSends, []);
+});
+
+check('send_chat_reply: a blank reply is refused before anything is typed', async () => {
+  const out = await callTool('send_chat_reply', {
+    match: 'Budi Santoso',
+    message: '   ',
+    confirm: true,
+  });
+  assert.match(out, /reply is blank/);
+  assert.deepEqual(portal.chatSends, []);
+});
+
+check('send_chat_reply: a plain reply is sent and confirmed in the thread', async () => {
+  const out = await callTool('send_chat_reply', {
+    match: 'Budi Santoso',
+    message: 'Stok ready kak',
+    confirm: true,
+  });
+  assert.match(out, /Reply sent to "Budi Santoso"/);
+  assert.deepEqual(portal.chatSends, [{ chat: 'c2', text: 'Stok ready kak' }]);
+});
+
+check('send_chat_reply: without confirm it previews and types nothing', async () => {
+  const out = await callTool('send_chat_reply', {
+    match: 'Budi Santoso',
+    message: 'Stok ready kak',
+  });
+  assert.match(out, /WRITE PREVIEW/);
+  assert.deepEqual(portal.chatSends, []);
+});
+
+check('send_chat_reply: refused while seller writes are disabled', async () => {
+  process.env.SHOPEE_ENABLE_SELLER_WRITES = 'false';
+  try {
+    const out = await callTool('send_chat_reply', {
+      match: 'Budi Santoso',
+      message: 'Stok ready kak',
+      confirm: true,
+    });
+    assert.match(out, /Seller write actions are disabled/);
+  } finally {
+    process.env.SHOPEE_ENABLE_SELLER_WRITES = 'true';
+  }
+  assert.deepEqual(portal.chatSends, []);
+});
+
 // ─── Runner ───────────────────────────────────────────────────────────────────
 
 const CHECK_DEADLINE_MS = 120_000;
@@ -539,6 +946,7 @@ async function main(): Promise<number> {
     return 1;
   }
 
+  await fs.writeFile(VIDEO_FILE, Buffer.alloc(4096));
   let failed = 0;
   for (const c of checks) {
     resetPortal();
