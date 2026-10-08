@@ -43,11 +43,13 @@ jobs:
         run: |
           NAME=$(node -p "require('./package.json').name")
           VERSION=$(node -p "require('./package.json').version")
+          # A version npm already has cannot be published again. Stop here instead of
+          # creating a GitHub release for a version that never reached npm.
           if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
-            echo "::notice::$NAME@$VERSION is already published — skipping publish."
-          else
-            npm publish
+            echo "::error title=Version already on npm::$NAME@$VERSION is already published, so nothing would be released. Bump the version in package.json, update CHANGELOG.md, then tag the new version (see docs/RELEASES.md)."
+            exit 1
           fi
+          npm publish
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v3

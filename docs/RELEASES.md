@@ -27,7 +27,7 @@ Releases are **automated** by the [`release` workflow](../.github/workflows/rele
 
 **One-time setup:** on npmjs.com, open the package → **Settings → Trusted Publisher** and register this GitHub repo plus `release.yml`. That uses npm **Trusted Publishing (OIDC)** — there is **no token** to create, store, or rotate. Until it is configured, the publish step fails (the build still runs).
 
-> **The tag must be a version npm does not have yet.** The workflow skips publishing when `package@version` already exists (so a re-tag is harmless), and that skip also means a forgotten version bump produces a GitHub release with **no** npm update. Bump `version` first, then tag.
+> **The tag must be a version npm does not have yet.** If `package@version` already exists on npm, the workflow fails before it publishes or creates a GitHub release, so a forgotten version bump stops the release instead of producing a GitHub release with no npm update. Bump `version` first, then tag. If the npm publish already succeeded and only the GitHub release is missing, create that release by hand: `gh release create vX.Y.Z --generate-notes`.
 
 **To cut a release:**
 
