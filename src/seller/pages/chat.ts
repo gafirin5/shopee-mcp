@@ -56,21 +56,35 @@ export async function openConversation(page: Page, match?: string): Promise<stri
   if (!match) {
     await items.first().click();
   } else {
-    let clicked = false;
+    const wanted = match.trim().toLowerCase();
+    const contains: number[] = [];
+    const exact: number[] = [];
     for (let i = 0; i < n; i++) {
-      const it = items.nth(i);
-      const text = (await it.innerText().catch(() => '')) || '';
-      if (text.includes(match)) {
-        await it.click();
-        clicked = true;
-        break;
-      }
+      const text = (
+        (await items
+          .nth(i)
+          .innerText()
+          .catch(() => '')) || ''
+      ).toLowerCase();
+      if (!text.includes(wanted)) continue;
+      contains.push(i);
+      // A buyer's name sits on a line of its own. A bare substring can be part of another
+      // name or of a message preview, so it is used only when no line matches exactly.
+      if (text.split('\n').some((line) => line.trim() === wanted)) exact.push(i);
     }
-    if (!clicked) {
+    if (contains.length === 0) {
       throw new Error(
         `No conversation matching "${match}" among ${n} entries — pass a buyer name or chat id shown in the list.`,
       );
     }
+    const candidates = exact.length ? exact : contains;
+    if (candidates.length > 1) {
+      // Two buyers can share a name. Picking one would send the reply to the wrong person.
+      throw new Error(
+        `${candidates.length} conversations match "${match}" — pass the exact buyer name or chat id from list_chats.`,
+      );
+    }
+    await items.nth(candidates[0]).click();
   }
   // Give the thread XHR a beat to land.
   await page.waitForTimeout(1500);

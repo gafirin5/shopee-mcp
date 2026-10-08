@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { sellerCaptureRaw } from '../../seller/capture.js';
-import { withSellerAction, assertSellerWritesEnabled } from '../../actions/base.js';
+import { withSellerAction, withSellerRead, assertSellerWritesEnabled } from '../../actions/base.js';
 import { openChat, openConversation, sendReply, CHAT_SEL } from '../../seller/pages/chat.js';
 import { withErrorHandling } from '../../utils/errors.js';
 import { confirmGate } from '../../utils/confirm.js';
@@ -57,7 +57,7 @@ export function registerSellerChatTools(server: McpServer): void {
     { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
     async ({ match, limit }) => {
       return withErrorHandling(async () => {
-        const text = await withSellerAction('read-chat', async (page) => {
+        const text = await withSellerRead('read-chat', async (page) => {
           await openChat(page);
           await openConversation(page, match);
           const bubbles = page.locator(CHAT_SEL.messageBubble);
@@ -99,6 +99,22 @@ export function registerSellerChatTools(server: McpServer): void {
     async ({ match, message, confirm }) => {
       return withErrorHandling(async () => {
         assertSellerWritesEnabled('send_chat_reply');
+        if (!message.trim()) {
+          return {
+            content: [{ type: 'text' as const, text: '❌ The reply is blank. Nothing was sent.' }],
+          };
+        }
+        // Enter sends the message in the composer, so a newline would send a fragment.
+        if (/[\r\n]/.test(message)) {
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: '❌ A chat reply must be one line: Enter sends each line separately. Nothing was sent.',
+              },
+            ],
+          };
+        }
         const gate = confirmGate(
           confirm,
           `Send chat reply${match ? ` to "${match}"` : ' to the newest conversation'}:\n\n> ${message}`,
@@ -109,13 +125,16 @@ export function registerSellerChatTools(server: McpServer): void {
           async (page) => {
             await openChat(page);
             await openConversation(page, match);
-            const bubbles = page.locator(CHAT_SEL.messageBubble);
-            const before = await bubbles.count();
+            // Count the bubbles that carry this reply's text, before and after. A new bubble
+            // alone is not proof: a buyer's message arriving at the same moment would fake one.
+            const showing = (): Promise<number> =>
+              page.locator(CHAT_SEL.messageBubble).filter({ hasText: message.trim() }).count();
+            const before = await showing();
             await sendReply(page, message);
-            const after = await bubbles.count();
+            const after = await showing();
             return after > before
               ? `✅ Reply sent${match ? ` to "${match}"` : ''}:\n${message}`
-              : `⚠️ Message typed and Enter pressed, but no new bubble was detected — verify in ` +
+              : `⚠️ Message typed and Enter pressed, but the reply text does not appear in the thread — verify in ` +
                   `the chat window. If the composer selector drifted, update CHAT_SEL.`;
           },
           `reply ${match ?? '(newest)'}: ${message.slice(0, 80)}`,

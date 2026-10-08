@@ -91,7 +91,21 @@ export async function withSellerAction<T>(
   fn: (page: Page) => Promise<T>,
   meta?: string,
 ): Promise<T> {
-  return withRealmAction(name, 'seller', fn, meta);
+  return withRealmAction(name, 'seller', 'write', fn, meta);
+}
+
+/**
+ * Read-only work on the seller realm, such as reading a chat thread. It takes the
+ * same browser lock and leaves the same debug screenshot on failure, but it spends
+ * the read budget and writes no audit entry: it changes nothing, so it must not
+ * count as a write.
+ */
+export async function withSellerRead<T>(
+  name: string,
+  fn: (page: Page) => Promise<T>,
+  meta?: string,
+): Promise<T> {
+  return withRealmAction(name, 'seller', 'read', fn, meta);
 }
 
 /** Same contract as withSellerAction, for write actions on the buyer realm. */
@@ -100,12 +114,22 @@ export async function withBuyerAction<T>(
   fn: (page: Page) => Promise<T>,
   meta?: string,
 ): Promise<T> {
-  return withRealmAction(name, 'buyer', fn, meta);
+  return withRealmAction(name, 'buyer', 'write', fn, meta);
+}
+
+/** Read-only work on the buyer realm. See withSellerRead. */
+export async function withBuyerRead<T>(
+  name: string,
+  fn: (page: Page) => Promise<T>,
+  meta?: string,
+): Promise<T> {
+  return withRealmAction(name, 'buyer', 'read', fn, meta);
 }
 
 async function withRealmAction<T>(
   name: string,
   realm: 'buyer' | 'seller',
+  kind: 'read' | 'write',
   fn: (page: Page) => Promise<T>,
   meta?: string,
 ): Promise<T> {
@@ -115,19 +139,23 @@ async function withRealmAction<T>(
     const page = await getPageFor(realm);
     try {
       const result = await fn(page);
-      audit({ kind: 'write', tool: `${realm}:${name}`, ok: true, detail: meta });
+      if (kind === 'write') {
+        audit({ kind: 'write', tool: `${realm}:${name}`, ok: true, detail: meta });
+      }
       return result;
     } catch (err) {
       const shot = await debugShot(page, name);
       const detail = err instanceof Error ? err.message : String(err);
-      audit({
-        kind: 'write',
-        tool: `${realm}:${name}`,
-        ok: false,
-        detail: meta,
-        error: detail.slice(0, 300),
-      });
+      if (kind === 'write') {
+        audit({
+          kind: 'write',
+          tool: `${realm}:${name}`,
+          ok: false,
+          detail: meta,
+          error: detail.slice(0, 300),
+        });
+      }
       throw new ActionError(`${detail}${shot ? `\n📸 Screenshot: ${shot}` : ''}`, shot);
     }
-  }, 'write');
+  }, kind);
 }

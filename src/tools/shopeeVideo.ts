@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { BASE_URL } from '../browser/session.js';
-import { withBuyerAction, stepDelay } from '../actions/base.js';
+import { withBuyerAction, withBuyerRead, stepDelay } from '../actions/base.js';
 import { withErrorHandling } from '../utils/errors.js';
 import { confirmGate } from '../utils/confirm.js';
 
@@ -38,7 +38,7 @@ export function registerShopeeVideoTools(server: McpServer): void {
     { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
     async () => {
       return withErrorHandling(async () => {
-        const text = await withBuyerAction('shopee-video-probe', async (page) => {
+        const text = await withBuyerRead('shopee-video-probe', async (page) => {
           const findings: string[] = [];
           for (const p of VIDEO_PATH_CANDIDATES) {
             const url = `${BASE_URL}${p}`;
