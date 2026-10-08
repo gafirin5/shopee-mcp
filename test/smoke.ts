@@ -38,6 +38,12 @@ interface Check {
   args: Record<string, unknown> | (() => Record<string, unknown>);
   // A pass requires at least one of these substrings.
   expect: string[];
+  /**
+   * Substrings that mean "this realm is not signed in" rather than a broken
+   * pipeline — the Seller Centre needs its own one-time login, so these checks
+   * degrade to a note instead of a failure on a buyer-only setup.
+   */
+  soft?: string[];
   /** Offered the response text, so later checks can use it. */
   capture?: (text: string) => void;
 }
@@ -103,7 +109,23 @@ const CHECKS: Check[] = [
     args: {},
     expect: ['Logged in to', 'Not logged in to'],
   },
+  // Seller Centre (reads only). Needs its own one-time login; without it these
+  // report the seller-login prompt, which `soft` accepts as "not configured".
+  { tool: 'check_seller_login', args: {}, expect: ['Seller Centre', 'not signed in'] },
+  {
+    tool: 'get_seller_shop_info',
+    args: {},
+    expect: ['Seller Shop Info'],
+    soft: ['Seller Centre session is not available'],
+  },
+  {
+    tool: 'list_seller_products',
+    args: { page: 1, max_rows: 3 },
+    expect: ['Seller Products'],
+    soft: ['Seller Centre session is not available'],
+  },
   // Account mode (read-only calls only — the smoke test never modifies the account).
+
   { tool: 'get_orders', account: true, args: { limit: 2 }, expect: ['Your orders', 'No orders'] },
   { tool: 'get_cart', account: true, args: {}, expect: ['Shopee Cart', 'cart is empty'] },
   {
@@ -159,8 +181,12 @@ async function main() {
       text = res.content.map((c) => c.text ?? '').join('\n');
       check.capture?.(text);
 
-      const hardFail = HARD_FAILURES.find((m) => text.includes(m));
-      if (hardFail) {
+      const soft = check.soft?.find((m) => text.includes(m));
+      const hardFail = soft ? undefined : HARD_FAILURES.find((m) => text.includes(m));
+      if (soft) {
+        status = 'PASS';
+        note = `not configured — ${soft}`;
+      } else if (hardFail) {
         note = `hard failure: "${hardFail}" — ${text.slice(0, 100).replace(/\n/g, ' ')}`;
       } else if (check.expect.some((m) => text.toLowerCase().includes(m.toLowerCase()))) {
         status = 'PASS';
