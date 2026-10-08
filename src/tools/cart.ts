@@ -222,13 +222,17 @@ async function clickInCartRow(page: Page, line: CartItem, control: string): Prom
   );
 }
 
-/** cart/update calls that edited this item (action_type 1 = quantity, 2 = delete). */
+/**
+ * cart/update calls that edited this item (action_type 1 = quantity, 2 = delete) and
+ * that Shopee accepted. A rejected call changed nothing, so it must not count.
+ */
 const cartEdits = (got: CollectedResponse[], itemid: number): CollectedResponse[] =>
   got.filter(
     (c) =>
       c.url.includes('cart/update') &&
       /"action_type":[12]/.test(c.postData) &&
-      c.postData.includes(`"itemid":${itemid}`),
+      c.postData.includes(`"itemid":${itemid}`) &&
+      !((c.json as { error?: number | null }).error ?? 0),
   );
 
 /** The largest quantity change applied in one call, one click at a time. */
@@ -454,6 +458,7 @@ export function registerCartTools(server: McpServer): void {
           let outcome: string | undefined;
           let line: CartItem | undefined;
           let applied = 0;
+          let blocked = false;
 
           await captureAccountWrite('update_cart_item', shopeeUrl('/cart'), {
             apiMatches: ['cart/get', 'cart/update'],
@@ -502,7 +507,10 @@ export function registerCartTools(server: McpServer): void {
               }
               for (let n = 0; n < Math.abs(diff); n++) {
                 const before = cartEdits(got, item.itemid).length;
-                if (!(await clickInCartRow(page, item, diff > 0 ? 'Increase' : 'Decrease'))) break;
+                if (!(await clickInCartRow(page, item, diff > 0 ? 'Increase' : 'Decrease'))) {
+                  blocked = true;
+                  break;
+                }
                 if (
                   !(await waitForCollected(
                     got,
@@ -524,6 +532,14 @@ export function registerCartTools(server: McpServer): void {
               applied
                 ? `🗑 Removed from your cart: ${name}`
                 : `❌ Shopee did not confirm removing ${name}.`,
+            );
+          }
+          if (applied === 0 && blocked) {
+            return text('❌ Could not find the +/− button on this line. Nothing was changed.');
+          }
+          if (applied === 0) {
+            return text(
+              `❌ Shopee did not confirm the change to ${name}. Its quantity is still ${line.quantity}.`,
             );
           }
           const target = Math.abs(quantity - line.quantity);
